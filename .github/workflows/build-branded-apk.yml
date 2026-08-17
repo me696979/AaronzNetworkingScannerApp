@@ -27,8 +27,15 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Install SVG renderer
-        run: sudo apt-get update && sudo apt-get install -y librsvg2-bin
+      - name: Install image tools
+        run: sudo apt-get update && sudo apt-get install -y imagemagick
+
+      - name: Download exact AaronzNetworking icon
+        run: |
+          curl --fail --location --retry 3 \
+            https://scannerlive.aaronznetworking.net/downloads/Trisate-Scanner-Icon.png \
+            -o /tmp/tristate-scanner-icon.png
+          file /tmp/tristate-scanner-icon.png
 
       - name: Generate Android launcher icons
         shell: bash
@@ -39,7 +46,7 @@ jobs:
             size="${spec##*:}"
             dir="app/src/main/res/mipmap-${density}"
             mkdir -p "$dir"
-            rsvg-convert -w "$size" -h "$size" app/icon-source.svg > "$dir/ic_launcher.png"
+            convert /tmp/tristate-scanner-icon.png -resize "${size}x${size}" "$dir/ic_launcher.png"
             cp "$dir/ic_launcher.png" "$dir/ic_launcher_round.png"
           done
 
