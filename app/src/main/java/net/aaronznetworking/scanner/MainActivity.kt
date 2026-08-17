@@ -11,9 +11,12 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.*
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.util.UUID
 
 class MainActivity : AppCompatActivity() {
     private val base = "https://scannerlive.aaronznetworking.net"
@@ -22,6 +25,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var controllerFuture: ListenableFuture<MediaController>
     private var running = false
     private var cursor: String? = null
+    private val listenerSessionId = "android-${UUID.randomUUID()}"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,6 +46,18 @@ class MainActivity : AppCompatActivity() {
                 delay(15000)
             }
         }
+
+        // Keep this Android listener registered while the scanner is started.
+        scope.launch {
+            while (isActive) {
+                if (running) {
+                    withContext(Dispatchers.IO) {
+                        sendListenerHeartbeat()
+                    }
+                }
+                delay(10000)
+            }
+        }
     }
 
     private fun startScanner() {
@@ -50,6 +66,11 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.status).text = "Starting at live edge…"
 
         scope.launch {
+            // Register immediately instead of waiting for the periodic heartbeat.
+            withContext(Dispatchers.IO) {
+                sendListenerHeartbeat()
+            }
+
             // Network requests must never run on Android's main/UI thread.
             cursor = withContext(Dispatchers.IO) {
                 getJson("/api/call-queue/latest")?.optString("latest_id")
@@ -76,6 +97,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopScanner() {
         running = false
+
+        scope.launch(Dispatchers.IO) {
+            sendListenerLeave()
+        }
+
         if (controllerFuture.isDone) {
             controllerFuture.get().stop()
             controllerFuture.get().clearMediaItems()
@@ -184,6 +210,39 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun sendListenerHeartbeat(): JSONObject? {
+        return postListenerEvent("/api/listeners/heartbeat")
+    }
+
+    private fun sendListenerLeave(): JSONObject? {
+        return postListenerEvent("/api/listeners/leave")
+    }
+
+    private fun postListenerEvent(path: String): JSONObject? = try {
+        val json = JSONObject()
+            .put("session_id", listenerSessionId)
+            .toString()
+
+        val body = json.toRequestBody(
+            "application/json; charset=utf-8".toMediaType()
+        )
+
+        http.newCall(
+            Request.Builder()
+                .url(base + path)
+                .post(body)
+                .build()
+        ).execute().use { response ->
+            if (response.isSuccessful) {
+                JSONObject(response.body?.string() ?: "{}")
+            } else {
+                null
+            }
+        }
+    } catch (_: Exception) {
+        null
+    }
+
     private fun getJson(path: String): JSONObject? = try {
         http.newCall(
             Request.Builder()
@@ -202,6 +261,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        if (running) {
+            // Best effort immediate removal; the server timeout is the fallback.
+            runBlocking(Dispatchers.IO) {
+                sendListenerLeave()
+            }
+        }
         MediaController.releaseFuture(controllerFuture)
         scope.cancel()
         super.onDestroy()
