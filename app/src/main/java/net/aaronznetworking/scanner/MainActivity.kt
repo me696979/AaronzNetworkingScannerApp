@@ -47,7 +47,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Keep this Android listener registered while the scanner is started.
         scope.launch {
             while (isActive) {
                 if (running) {
@@ -66,12 +65,10 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.status).text = "Starting at live edge…"
 
         scope.launch {
-            // Register immediately instead of waiting for the periodic heartbeat.
             withContext(Dispatchers.IO) {
                 sendListenerHeartbeat()
             }
 
-            // Network requests must never run on Android's main/UI thread.
             cursor = withContext(Dispatchers.IO) {
                 getJson("/api/call-queue/latest")?.optString("latest_id")
             }
@@ -158,7 +155,6 @@ class MainActivity : AppCompatActivity() {
         controller.prepare()
         controller.play()
 
-        // Wait for this radio call to finish before starting the next one.
         while (
             running &&
             controller.playerError == null &&
@@ -189,8 +185,17 @@ class MainActivity : AppCompatActivity() {
 
         withContext(Dispatchers.Main) {
             if (stats != null) {
+                val web = stats.optInt("web")
+                val android = stats.optInt("android")
+                val ios = stats.optInt("ios")
+                val breakdown = buildList {
+                    add("Web $web")
+                    add("App $android")
+                    if (ios > 0) add("iOS $ios")
+                }.joinToString(" • ")
+
                 findViewById<TextView>(R.id.listeners).text =
-                    "Listeners: ${stats.optInt("listeners")}     Peak: ${stats.optInt("peak")}"
+                    "Listeners: ${stats.optInt("listeners")}     Peak: ${stats.optInt("peak")}\n$breakdown"
             }
 
             val arr = alertsJson?.optJSONArray("alerts")
@@ -221,6 +226,7 @@ class MainActivity : AppCompatActivity() {
     private fun postListenerEvent(path: String): JSONObject? = try {
         val json = JSONObject()
             .put("session_id", listenerSessionId)
+            .put("platform", "android")
             .toString()
 
         val body = json.toRequestBody(
@@ -262,7 +268,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         if (running) {
-            // Best effort immediate removal; the server timeout is the fallback.
             runBlocking(Dispatchers.IO) {
                 sendListenerLeave()
             }
