@@ -1,15 +1,139 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true">
- <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="20dp">
-  <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="TRI-STATE SCANNER" android:textSize="26sp" android:textStyle="bold" />
-  <TextView android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Ready" android:textSize="16sp" android:paddingTop="8dp" />
-  <Button android:id="@+id/startButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="START SCANNER" android:layout_marginTop="18dp" />
-  <TextView android:id="@+id/nowPlaying" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Scanning…" android:textSize="21sp" android:textStyle="bold" android:paddingTop="24dp" />
-  <TextView android:id="@+id/details" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingTop="6dp" />
-  <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="AI TRANSCRIPT" android:textStyle="bold" android:paddingTop="24dp" />
-  <TextView android:id="@+id/transcript" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Waiting for call…" android:paddingTop="6dp" />
-  <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="ACTIVE ALERTS" android:textStyle="bold" android:paddingTop="24dp" />
-  <TextView android:id="@+id/alerts" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="No active major incidents" android:paddingTop="6dp" />
-  <TextView android:id="@+id/listeners" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Listeners: --   Peak: --" android:paddingTop="24dp" />
- </LinearLayout>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:background="#07110B"
+    android:fitsSystemWindows="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingLeft="18dp"
+        android:paddingRight="18dp"
+        android:paddingTop="54dp"
+        android:paddingBottom="32dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="TRI-STATE SCANNER"
+            android:textColor="#6CFF88"
+            android:textSize="27sp"
+            android:textStyle="bold"
+            android:fontFamily="monospace"
+            android:gravity="center_horizontal" />
+
+        <TextView
+            android:id="@+id/status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Ready"
+            android:textColor="#A8CDB0"
+            android:textSize="14sp"
+            android:fontFamily="monospace"
+            android:gravity="center_horizontal"
+            android:paddingTop="10dp" />
+
+        <Button
+            android:id="@+id/startButton"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:text="START SCANNER"
+            android:textStyle="bold"
+            android:textColor="#07110B"
+            android:backgroundTint="#6CFF88"
+            android:layout_marginTop="20dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:layout_marginTop="18dp"
+            android:background="#0E2115">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="NOW PLAYING"
+                android:textColor="#6CFF88"
+                android:textStyle="bold"
+                android:textSize="12sp"
+                android:fontFamily="monospace" />
+
+            <TextView
+                android:id="@+id/nowPlaying"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Scanning…"
+                android:textColor="#E9FFF0"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace"
+                android:paddingTop="8dp" />
+
+            <TextView
+                android:id="@+id/details"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#9BC8A6"
+                android:textSize="13sp"
+                android:fontFamily="monospace"
+                android:paddingTop="6dp" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="AI TRANSCRIPT"
+            android:textColor="#6CFF88"
+            android:textStyle="bold"
+            android:fontFamily="monospace"
+            android:paddingTop="24dp" />
+
+        <TextView
+            android:id="@+id/transcript"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Waiting for call…"
+            android:textColor="#E9FFF0"
+            android:textSize="15sp"
+            android:fontFamily="monospace"
+            android:lineSpacingExtra="3dp"
+            android:paddingTop="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="ACTIVE ALERTS"
+            android:textColor="#FFB04A"
+            android:textStyle="bold"
+            android:fontFamily="monospace"
+            android:paddingTop="26dp" />
+
+        <TextView
+            android:id="@+id/alerts"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="No active major incidents"
+            android:textColor="#FFE0B0"
+            android:textSize="14sp"
+            android:fontFamily="monospace"
+            android:lineSpacingExtra="3dp"
+            android:paddingTop="8dp" />
+
+        <TextView
+            android:id="@+id/listeners"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Listeners: --     Peak: --"
+            android:textColor="#9BC8A6"
+            android:textSize="14sp"
+            android:fontFamily="monospace"
+            android:gravity="center_horizontal"
+            android:paddingTop="28dp" />
+
+    </LinearLayout>
 </ScrollView>
