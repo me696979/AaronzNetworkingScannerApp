@@ -62,7 +62,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startScanner() {
-        // Completely invalidate any previous scanner session before starting.
         scannerGeneration += 1
         val generation = scannerGeneration
 
@@ -86,7 +85,6 @@ class MainActivity : AppCompatActivity() {
                 sendListenerHeartbeat()
             }
 
-            // Always establish a brand-new live-edge cursor for this session.
             val liveEdge = withContext(Dispatchers.IO) {
                 getJson("/api/call-queue/latest")?.optString("latest_id")
             }
@@ -127,8 +125,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopScanner() {
         running = false
-
-        // Invalidate the old session so it can never resume after Start is tapped again.
         scannerGeneration += 1
         scannerJob?.cancel()
         scannerJob = null
@@ -204,7 +200,7 @@ class MainActivity : AppCompatActivity() {
         controller.play()
 
         while (
-            isActive &&
+            currentCoroutineContext().isActive &&
             running &&
             generation == scannerGeneration &&
             controller.playerError == null &&
