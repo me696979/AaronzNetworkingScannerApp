@@ -1,3 +1,4 @@
+# Rebuild trigger for fresh live-edge Android restart fix
 name: Build Branded Android APK
 
 on:
