@@ -25,6 +25,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var controllerFuture: ListenableFuture<MediaController>
     private var running = false
     private var cursor: String? = null
+    private var scannerJob: Job? = null
+    private var scannerGeneration = 0L
     private val listenerSessionId = "android-${UUID.randomUUID()}"
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,33 +62,64 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startScanner() {
+        // Completely invalidate any previous scanner session before starting.
+        scannerGeneration += 1
+        val generation = scannerGeneration
+
+        scannerJob?.cancel()
+        scannerJob = null
+        cursor = null
+
+        if (controllerFuture.isDone) {
+            controllerFuture.get().stop()
+            controllerFuture.get().clearMediaItems()
+        }
+
         running = true
         findViewById<Button>(R.id.startButton).text = "STOP SCANNER"
         findViewById<TextView>(R.id.status).text = "Starting at live edge…"
+        findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
+        findViewById<TextView>(R.id.details).text = ""
 
-        scope.launch {
+        scannerJob = scope.launch {
             withContext(Dispatchers.IO) {
                 sendListenerHeartbeat()
             }
 
-            cursor = withContext(Dispatchers.IO) {
+            // Always establish a brand-new live-edge cursor for this session.
+            val liveEdge = withContext(Dispatchers.IO) {
                 getJson("/api/call-queue/latest")?.optString("latest_id")
             }
 
-            if (cursor.isNullOrBlank()) {
-                findViewById<TextView>(R.id.status).text = "Server connection failed - retrying…"
-            } else {
-                findViewById<TextView>(R.id.status).text = "Waiting for next call…"
+            if (!running || generation != scannerGeneration) {
+                return@launch
             }
 
-            while (running) {
+            cursor = liveEdge
+
+            if (cursor.isNullOrBlank()) {
+                findViewById<TextView>(R.id.status).text =
+                    "Server connection failed - retrying…"
+            } else {
+                findViewById<TextView>(R.id.status).text =
+                    "Waiting for next call…"
+            }
+
+            while (isActive && running && generation == scannerGeneration) {
                 if (cursor.isNullOrBlank()) {
-                    cursor = withContext(Dispatchers.IO) {
+                    val refreshedLiveEdge = withContext(Dispatchers.IO) {
                         getJson("/api/call-queue/latest")?.optString("latest_id")
                     }
+
+                    if (!running || generation != scannerGeneration) {
+                        break
+                    }
+
+                    cursor = refreshedLiveEdge
                 } else {
-                    pollCalls()
+                    pollCalls(generation)
                 }
+
                 delay(1500)
             }
         }
@@ -94,6 +127,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopScanner() {
         running = false
+
+        // Invalidate the old session so it can never resume after Start is tapped again.
+        scannerGeneration += 1
+        scannerJob?.cancel()
+        scannerJob = null
+        cursor = null
 
         scope.launch(Dispatchers.IO) {
             sendListenerLeave()
@@ -103,34 +142,43 @@ class MainActivity : AppCompatActivity() {
             controllerFuture.get().stop()
             controllerFuture.get().clearMediaItems()
         }
+
         findViewById<Button>(R.id.startButton).text = "START SCANNER"
         findViewById<TextView>(R.id.status).text = "Stopped"
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
     }
 
-    private suspend fun pollCalls() {
+    private suspend fun pollCalls(generation: Long) {
+        if (!running || generation != scannerGeneration) return
+
         val after = cursor ?: return
 
         val json = withContext(Dispatchers.IO) {
             getJson("/api/call-queue?limit=20&after=$after")
         } ?: return
 
+        if (!running || generation != scannerGeneration) return
+
         val calls = json.optJSONArray("calls") ?: return
 
         for (i in 0 until calls.length()) {
-            if (!running) break
+            if (!running || generation != scannerGeneration) break
 
             val call = calls.getJSONObject(i)
             cursor = call.optString("id", cursor)
-            playCallAndWait(call)
+            playCallAndWait(call, generation)
         }
     }
 
-    private suspend fun playCallAndWait(call: JSONObject) {
+    private suspend fun playCallAndWait(call: JSONObject, generation: Long) {
+        if (!running || generation != scannerGeneration) return
+
         val controller = withContext(Dispatchers.IO) {
             controllerFuture.get()
         }
+
+        if (!running || generation != scannerGeneration) return
 
         val label = call.optString(
             "talkgroupLabel",
@@ -156,14 +204,16 @@ class MainActivity : AppCompatActivity() {
         controller.play()
 
         while (
+            isActive &&
             running &&
+            generation == scannerGeneration &&
             controller.playerError == null &&
             controller.playbackState != Player.STATE_ENDED
         ) {
             delay(150)
         }
 
-        if (running) {
+        if (running && generation == scannerGeneration) {
             findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
             findViewById<TextView>(R.id.details).text = ""
             findViewById<TextView>(R.id.status).text = "Waiting for next call…"
@@ -267,11 +317,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        if (running) {
-            runBlocking(Dispatchers.IO) {
-                sendListenerLeave()
-            }
+        running = false
+        scannerGeneration += 1
+        scannerJob?.cancel()
+        scannerJob = null
+        cursor = null
+
+        runBlocking(Dispatchers.IO) {
+            sendListenerLeave()
         }
+
+        if (controllerFuture.isDone) {
+            controllerFuture.get().stop()
+            controllerFuture.get().clearMediaItems()
+        }
+
         MediaController.releaseFuture(controllerFuture)
         scope.cancel()
         super.onDestroy()
