@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.os.Bundle
 import android.widget.Button
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -29,6 +30,28 @@ class MainActivity : AppCompatActivity() {
     private var scannerGeneration = 0L
     private val listenerSessionId = "android-${UUID.randomUUID()}"
 
+    private data class TalkgroupOption(
+        val id: Int,
+        val name: String,
+        val agency: String
+    )
+
+    private data class TranscriptEntry(
+        val id: String,
+        val label: String,
+        val text: String
+    )
+
+    private val talkgroups = mutableListOf<TalkgroupOption>()
+    private val blockedTalkgroups = mutableSetOf<Int>()
+    private val pendingTranscripts = linkedMapOf<String, String>()
+    private val seenTranscriptIds = mutableSetOf<String>()
+    private val recentTranscripts = mutableListOf<TranscriptEntry>()
+
+    private val prefs by lazy {
+        getSharedPreferences("scanner_prefs", MODE_PRIVATE)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -40,6 +63,17 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.startButton).setOnClickListener {
             if (!running) startScanner() else stopScanner()
+        }
+
+        findViewById<Button>(R.id.talkgroupButton).setOnClickListener {
+            showTalkgroupDialog()
+        }
+
+        loadSavedBlockedTalkgroups()
+        renderRecentTranscripts()
+
+        scope.launch {
+            loadTalkgroups()
         }
 
         scope.launch {
@@ -57,6 +91,13 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 delay(10000)
+            }
+        }
+
+        scope.launch {
+            while (isActive) {
+                pollOnePendingTranscript()
+                delay(1000)
             }
         }
     }
@@ -83,6 +124,7 @@ class MainActivity : AppCompatActivity() {
         scannerJob = scope.launch {
             withContext(Dispatchers.IO) {
                 sendListenerHeartbeat()
+                pushListenerPreferences()
             }
 
             val liveEdge = withContext(Dispatchers.IO) {
@@ -151,7 +193,9 @@ class MainActivity : AppCompatActivity() {
         val after = cursor ?: return
 
         val json = withContext(Dispatchers.IO) {
-            getJson("/api/call-queue?limit=20&after=$after")
+            getJson(
+                "/api/call-queue?limit=20&after=$after&session_id=$listenerSessionId"
+            )
         } ?: return
 
         if (!running || generation != scannerGeneration) return
@@ -163,6 +207,12 @@ class MainActivity : AppCompatActivity() {
 
             val call = calls.getJSONObject(i)
             cursor = call.optString("id", cursor)
+
+            val tg = call.optString("talkgroup").toIntOrNull()
+            if (tg != null && tg in blockedTalkgroups) {
+                continue
+            }
+
             playCallAndWait(call, generation)
         }
     }
@@ -185,14 +235,20 @@ class MainActivity : AppCompatActivity() {
         val radio = call.optString("source")
         val tg = call.optString("talkgroup")
         val audioUrl = call.optString("audio_url")
+        val callId = call.optString("id")
 
         if (audioUrl.isBlank()) return
+
+        if (callId.isNotBlank() && callId !in seenTranscriptIds) {
+            pendingTranscripts[callId] = label
+            while (pendingTranscripts.size > 20) {
+                pendingTranscripts.remove(pendingTranscripts.keys.first())
+            }
+        }
 
         findViewById<TextView>(R.id.nowPlaying).text = label
         findViewById<TextView>(R.id.details).text =
             "TGID $tg  •  $frequency  •  Radio $radio"
-        findViewById<TextView>(R.id.transcript).text =
-            call.optString("transcript", "Transcription pending…")
         findViewById<TextView>(R.id.status).text = "Playing"
 
         controller.setMediaItem(MediaItem.fromUri(base + audioUrl))
@@ -214,6 +270,201 @@ class MainActivity : AppCompatActivity() {
             findViewById<TextView>(R.id.details).text = ""
             findViewById<TextView>(R.id.status).text = "Waiting for next call…"
         }
+    }
+
+    private suspend fun pollOnePendingTranscript() {
+        val next = pendingTranscripts.entries.firstOrNull() ?: return
+        val callId = next.key
+        val label = next.value
+
+        val data = withContext(Dispatchers.IO) {
+            getJson("/api/call-detail/$callId")
+        } ?: return
+
+        when (data.optString("transcription_status", "pending")) {
+            "complete" -> {
+                pendingTranscripts.remove(callId)
+                val text = data.optString("transcript").trim()
+
+                if (text.isNotBlank() && callId !in seenTranscriptIds) {
+                    seenTranscriptIds.add(callId)
+                    recentTranscripts.add(
+                        0,
+                        TranscriptEntry(callId, label, text)
+                    )
+
+                    while (recentTranscripts.size > 3) {
+                        recentTranscripts.removeAt(recentTranscripts.lastIndex)
+                    }
+
+                    renderRecentTranscripts()
+                }
+            }
+
+            "filtered", "error" -> {
+                pendingTranscripts.remove(callId)
+            }
+        }
+    }
+
+    private fun renderRecentTranscripts() {
+        val transcriptView = findViewById<TextView>(R.id.transcript)
+
+        transcriptView.text = if (recentTranscripts.isEmpty()) {
+            "Waiting for completed transcripts…"
+        } else {
+            recentTranscripts.joinToString("\n\n") {
+                "${it.label}\n${it.text}"
+            }
+        }
+    }
+
+    private suspend fun loadTalkgroups() {
+        val data = withContext(Dispatchers.IO) {
+            getJson("/api/public/talkgroups")
+        } ?: return
+
+        val arr = data.optJSONArray("talkgroups") ?: return
+
+        talkgroups.clear()
+
+        for (i in 0 until arr.length()) {
+            val tg = arr.getJSONObject(i)
+            val id = tg.optInt("talkgroup_id", 0)
+            if (id <= 0) continue
+
+            talkgroups.add(
+                TalkgroupOption(
+                    id = id,
+                    name = tg.optString("name", "Talkgroup $id"),
+                    agency = tg.optString("agency", "")
+                )
+            )
+        }
+
+        updateTalkgroupButton()
+
+        withContext(Dispatchers.IO) {
+            pushListenerPreferences()
+        }
+    }
+
+    private fun loadSavedBlockedTalkgroups() {
+        blockedTalkgroups.clear()
+        blockedTalkgroups.addAll(
+            prefs.getStringSet("blocked_talkgroups", emptySet())
+                .orEmpty()
+                .mapNotNull { it.toIntOrNull() }
+        )
+    }
+
+    private fun saveBlockedTalkgroups() {
+        prefs.edit()
+            .putStringSet(
+                "blocked_talkgroups",
+                blockedTalkgroups.map { it.toString() }.toSet()
+            )
+            .apply()
+    }
+
+    private fun updateTalkgroupButton() {
+        val button = findViewById<Button>(R.id.talkgroupButton)
+
+        if (talkgroups.isEmpty()) {
+            button.text = "CHOOSE TALKGROUPS"
+            return
+        }
+
+        val existingIds = talkgroups.map { it.id }.toSet()
+        val blockedExisting = blockedTalkgroups.count { it in existingIds }
+        val enabled = (talkgroups.size - blockedExisting).coerceAtLeast(0)
+
+        button.text = "TALKGROUPS: $enabled/${talkgroups.size} ENABLED"
+    }
+
+    private fun showTalkgroupDialog() {
+        if (talkgroups.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle("Talkgroups")
+                .setMessage("Talkgroup list is still loading. Try again in a moment.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+
+        val labels = talkgroups.map { tg ->
+            if (tg.agency.isBlank()) {
+                "${tg.name} (TG ${tg.id})"
+            } else {
+                "${tg.name} (TG ${tg.id})\n${tg.agency}"
+            }
+        }.toTypedArray()
+
+        val checked = BooleanArray(talkgroups.size) { index ->
+            talkgroups[index].id !in blockedTalkgroups
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Choose Talkgroups")
+            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton("Save") { _, _ ->
+                blockedTalkgroups.clear()
+
+                for (i in talkgroups.indices) {
+                    if (!checked[i]) {
+                        blockedTalkgroups.add(talkgroups[i].id)
+                    }
+                }
+
+                saveBlockedTalkgroups()
+                updateTalkgroupButton()
+
+                scope.launch(Dispatchers.IO) {
+                    pushListenerPreferences()
+                }
+            }
+            .setNeutralButton("Enable All") { _, _ ->
+                blockedTalkgroups.clear()
+                saveBlockedTalkgroups()
+                updateTalkgroupButton()
+
+                scope.launch(Dispatchers.IO) {
+                    pushListenerPreferences()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun pushListenerPreferences(): JSONObject? = try {
+        val blocked = org.json.JSONArray()
+        blockedTalkgroups.sorted().forEach { blocked.put(it) }
+
+        val json = JSONObject()
+            .put("session_id", listenerSessionId)
+            .put("blocked_talkgroups", blocked)
+            .toString()
+
+        val body = json.toRequestBody(
+            "application/json; charset=utf-8".toMediaType()
+        )
+
+        http.newCall(
+            Request.Builder()
+                .url(base + "/api/listener/preferences")
+                .put(body)
+                .build()
+        ).execute().use { response ->
+            if (response.isSuccessful) {
+                JSONObject(response.body?.string() ?: "{}")
+            } else {
+                null
+            }
+        }
+    } catch (_: Exception) {
+        null
     }
 
     private fun formatFrequency(value: String): String {
