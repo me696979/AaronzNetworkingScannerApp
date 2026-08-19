@@ -46,6 +46,26 @@
             android:backgroundTint="#6CFF88"
             android:layout_marginTop="20dp" />
 
+        <Button
+            android:id="@+id/talkgroupButton"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:text="CHOOSE TALKGROUPS"
+            android:textStyle="bold"
+            android:textColor="#D8F7DE"
+            android:backgroundTint="#173D20"
+            android:layout_marginTop="10dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Choose exactly which agencies/talkgroups you want to hear. Your choices are saved on this device."
+            android:textColor="#7FAF8A"
+            android:textSize="12sp"
+            android:fontFamily="monospace"
+            android:gravity="center_horizontal"
+            android:paddingTop="6dp" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -87,7 +107,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="AI TRANSCRIPT"
+            android:text="RECENT AI TRANSCRIPTS"
             android:textColor="#6CFF88"
             android:textStyle="bold"
             android:fontFamily="monospace"
@@ -97,7 +117,7 @@
             android:id="@+id/transcript"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Waiting for call…"
+            android:text="Waiting for completed transcripts…"
             android:textColor="#E9FFF0"
             android:textSize="15sp"
             android:fontFamily="monospace"
