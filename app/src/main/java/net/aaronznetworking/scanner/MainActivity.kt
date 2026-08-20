@@ -2,6 +2,7 @@ package net.aaronznetworking.scanner
 
 import android.content.ComponentName
 import android.os.Bundle
+import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
@@ -42,11 +43,23 @@ class MainActivity : AppCompatActivity() {
         val text: String
     )
 
+    private data class AnnouncementEntry(
+        val id: Int,
+        val title: String,
+        val message: String,
+        val startsAt: String
+    ) {
+        val fingerprint: String
+            get() = "$id|$title|$message|$startsAt"
+    }
+
     private val talkgroups = mutableListOf<TalkgroupOption>()
     private val blockedTalkgroups = mutableSetOf<Int>()
     private val pendingTranscripts = linkedMapOf<String, String>()
     private val seenTranscriptIds = mutableSetOf<String>()
     private val recentTranscripts = mutableListOf<TranscriptEntry>()
+    private val activeAnnouncements = mutableListOf<AnnouncementEntry>()
+    private var announcementDialogShowing = false
 
     private val prefs by lazy {
         getSharedPreferences("scanner_prefs", MODE_PRIVATE)
@@ -71,6 +84,7 @@ class MainActivity : AppCompatActivity() {
 
         loadSavedBlockedTalkgroups()
         renderRecentTranscripts()
+        renderAnnouncements()
 
         scope.launch {
             loadTalkgroups()
@@ -80,6 +94,13 @@ class MainActivity : AppCompatActivity() {
             while (isActive) {
                 updateStatsAndAlerts()
                 delay(15000)
+            }
+        }
+
+        scope.launch {
+            while (isActive) {
+                updateAnnouncements()
+                delay(10000)
             }
         }
 
@@ -317,6 +338,91 @@ class MainActivity : AppCompatActivity() {
                 "${it.label}\n${it.text}"
             }
         }
+    }
+
+    private suspend fun updateAnnouncements() {
+        val data = withContext(Dispatchers.IO) {
+            getJson("/api/public/announcements")
+        } ?: return
+
+        val arr = data.optJSONArray("announcements") ?: return
+        val incoming = mutableListOf<AnnouncementEntry>()
+
+        for (i in 0 until arr.length()) {
+            val item = arr.getJSONObject(i)
+            val id = item.optInt("id", 0)
+            if (id <= 0) continue
+
+            incoming.add(
+                AnnouncementEntry(
+                    id = id,
+                    title = item.optString("title", "Announcement"),
+                    message = item.optString("message", ""),
+                    startsAt = item.optString("starts_at", "")
+                )
+            )
+        }
+
+        activeAnnouncements.clear()
+        activeAnnouncements.addAll(incoming)
+        renderAnnouncements()
+        showNewAnnouncementPopup(incoming)
+    }
+
+    private fun renderAnnouncements() {
+        val section = findViewById<View>(R.id.announcementSection)
+        val textView = findViewById<TextView>(R.id.announcementText)
+
+        if (activeAnnouncements.isEmpty()) {
+            section.visibility = View.GONE
+            textView.text = ""
+            return
+        }
+
+        section.visibility = View.VISIBLE
+        textView.text = activeAnnouncements.joinToString("\n\n") {
+            "${it.title}\n${it.message}"
+        }
+    }
+
+    private fun showNewAnnouncementPopup(items: List<AnnouncementEntry>) {
+        if (items.isEmpty() || announcementDialogShowing || isFinishing || isDestroyed) {
+            return
+        }
+
+        val seen = prefs.getStringSet("seen_announcements", emptySet())
+            .orEmpty()
+            .toMutableSet()
+
+        val unseen = items.filter { it.fingerprint !in seen }
+
+        if (unseen.isEmpty()) {
+            return
+        }
+
+        val dialogText = unseen.joinToString("\n\n") {
+            "${it.title}\n${it.message}"
+        }
+
+        announcementDialogShowing = true
+
+        AlertDialog.Builder(this)
+            .setTitle("📢 Scanner Announcement")
+            .setMessage(dialogText)
+            .setPositiveButton("OK") { _, _ ->
+                unseen.forEach { seen.add(it.fingerprint) }
+                prefs.edit()
+                    .putStringSet("seen_announcements", seen)
+                    .apply()
+            }
+            .setOnDismissListener {
+                unseen.forEach { seen.add(it.fingerprint) }
+                prefs.edit()
+                    .putStringSet("seen_announcements", seen)
+                    .apply()
+                announcementDialogShowing = false
+            }
+            .show()
     }
 
     private suspend fun loadTalkgroups() {
