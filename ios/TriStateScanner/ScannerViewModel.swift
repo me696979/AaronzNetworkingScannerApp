@@ -190,11 +190,14 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private func waitForPlaybackEnd(_ item: AVPlayerItem) async {
-        await withCheckedContinuation { continuation in
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             var ended: NSObjectProtocol?
             var failed: NSObjectProtocol?
+            var finished = false
 
             func finish() {
+                guard !finished else { return }
+                finished = true
                 if let ended { NotificationCenter.default.removeObserver(ended) }
                 if let failed { NotificationCenter.default.removeObserver(failed) }
                 continuation.resume()
