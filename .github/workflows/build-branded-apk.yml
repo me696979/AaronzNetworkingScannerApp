@@ -1,4 +1,4 @@
-# Build Android artifacts for direct testing and Google Play release
+# Build Android artifacts for direct testing and Google Play release (signed AAB enabled)
 name: Build Branded Android APK and AAB
 
 on:
