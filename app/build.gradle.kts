@@ -8,7 +8,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "net.aaronznetworking.scanner"
+        applicationId = "huntington.localscannerapp"
         minSdk = 26
         targetSdk = 35
         versionCode = 6
