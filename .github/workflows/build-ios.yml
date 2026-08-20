@@ -1,0 +1,72 @@
+name: Build Tri-State Scanner iOS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'ios/**'
+      - '.github/workflows/build-ios.yml'
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Download current Tri-State Scanner icon
+        run: |
+          curl --fail --location --retry 3 \
+            https://scannerlive.aaronznetworking.net/downloads/Trisate-Scanner-Icon.png \
+            -o /tmp/tristate-scanner-icon.png
+          file /tmp/tristate-scanner-icon.png
+
+      - name: Generate iOS app icons
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="ios/TriStateScanner/Resources/Assets.xcassets/AppIcon.appiconset"
+          mkdir -p "$dir"
+          sips -z 40 40 /tmp/tristate-scanner-icon.png --out "$dir/icon-20@2x.png" >/dev/null
+          sips -z 60 60 /tmp/tristate-scanner-icon.png --out "$dir/icon-20@3x.png" >/dev/null
+          sips -z 58 58 /tmp/tristate-scanner-icon.png --out "$dir/icon-29@2x.png" >/dev/null
+          sips -z 87 87 /tmp/tristate-scanner-icon.png --out "$dir/icon-29@3x.png" >/dev/null
+          sips -z 80 80 /tmp/tristate-scanner-icon.png --out "$dir/icon-40@2x.png" >/dev/null
+          sips -z 120 120 /tmp/tristate-scanner-icon.png --out "$dir/icon-40@3x.png" >/dev/null
+          sips -z 120 120 /tmp/tristate-scanner-icon.png --out "$dir/icon-60@2x.png" >/dev/null
+          sips -z 180 180 /tmp/tristate-scanner-icon.png --out "$dir/icon-60@3x.png" >/dev/null
+          sips -z 1024 1024 /tmp/tristate-scanner-icon.png --out "$dir/icon-1024.png" >/dev/null
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Build iOS Simulator app
+        working-directory: ios
+        run: |
+          xcodebuild \
+            -project TriStateScanner.xcodeproj \
+            -scheme TriStateScanner \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package simulator app
+        working-directory: ios
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            build/DerivedData/Build/Products/Debug-iphonesimulator/TriStateScanner.app \
+            Tri-State-Scanner-iOS-Simulator.zip
+
+      - name: Upload iOS simulator build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tri-State-Scanner-iOS-Simulator
+          path: ios/Tri-State-Scanner-iOS-Simulator.zip
