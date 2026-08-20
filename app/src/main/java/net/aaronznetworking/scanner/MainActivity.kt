@@ -47,10 +47,11 @@ class MainActivity : AppCompatActivity() {
         val id: Int,
         val title: String,
         val message: String,
-        val startsAt: String
+        val startsAt: String,
+        val updatedAt: String
     ) {
         val fingerprint: String
-            get() = "$id|$title|$message|$startsAt"
+            get() = "$id|$title|$message|$startsAt|$updatedAt"
     }
 
     private val talkgroups = mutableListOf<TalkgroupOption>()
@@ -87,7 +88,10 @@ class MainActivity : AppCompatActivity() {
         renderAnnouncements()
 
         scope.launch {
-            loadTalkgroups()
+            while (isActive) {
+                loadTalkgroups()
+                delay(5000)
+            }
         }
 
         scope.launch {
@@ -100,7 +104,7 @@ class MainActivity : AppCompatActivity() {
         scope.launch {
             while (isActive) {
                 updateAnnouncements()
-                delay(10000)
+                delay(5000)
             }
         }
 
@@ -358,7 +362,8 @@ class MainActivity : AppCompatActivity() {
                     id = id,
                     title = item.optString("title", "Announcement"),
                     message = item.optString("message", ""),
-                    startsAt = item.optString("starts_at", "")
+                    startsAt = item.optString("starts_at", ""),
+                    updatedAt = item.optString("updated_at", "")
                 )
             )
         }
@@ -412,13 +417,13 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("OK") { _, _ ->
                 unseen.forEach { seen.add(it.fingerprint) }
                 prefs.edit()
-                    .putStringSet("seen_announcements", seen)
+                    .putStringSet("seen_announcements", seen.takeLast(100).toSet())
                     .apply()
             }
             .setOnDismissListener {
                 unseen.forEach { seen.add(it.fingerprint) }
                 prefs.edit()
-                    .putStringSet("seen_announcements", seen)
+                    .putStringSet("seen_announcements", seen.takeLast(100).toSet())
                     .apply()
                 announcementDialogShowing = false
             }
@@ -431,15 +436,14 @@ class MainActivity : AppCompatActivity() {
         } ?: return
 
         val arr = data.optJSONArray("talkgroups") ?: return
-
-        talkgroups.clear()
+        val incoming = mutableListOf<TalkgroupOption>()
 
         for (i in 0 until arr.length()) {
             val tg = arr.getJSONObject(i)
             val id = tg.optInt("talkgroup_id", 0)
             if (id <= 0) continue
 
-            talkgroups.add(
+            incoming.add(
                 TalkgroupOption(
                     id = id,
                     name = tg.optString("name", "Talkgroup $id"),
@@ -448,10 +452,10 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        updateTalkgroupButton()
-
-        withContext(Dispatchers.IO) {
-            pushListenerPreferences()
+        if (incoming != talkgroups) {
+            talkgroups.clear()
+            talkgroups.addAll(incoming)
+            updateTalkgroupButton()
         }
     }
 
