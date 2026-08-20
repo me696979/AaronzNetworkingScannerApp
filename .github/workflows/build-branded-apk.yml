@@ -31,12 +31,10 @@ jobs:
       - name: Install image tools
         run: sudo apt-get update && sudo apt-get install -y imagemagick
 
-      - name: Download exact AaronzNetworking icon
+      - name: Verify Scannerz Network icon
         run: |
-          curl --fail --location --retry 3 \
-            https://scannerlive.aaronznetworking.net/downloads/Trisate-Scanner-Icon.png \
-            -o /tmp/tristate-scanner-icon.png
-          file /tmp/tristate-scanner-icon.png
+          test -f app/Scannerz-Network-Icon.png
+          file app/Scannerz-Network-Icon.png
 
       - name: Generate Android launcher icons
         shell: bash
@@ -47,38 +45,21 @@ jobs:
             size="${spec##*:}"
             dir="app/src/main/res/mipmap-${density}"
             mkdir -p "$dir"
-            convert /tmp/tristate-scanner-icon.png -resize "${size}x${size}" "$dir/ic_launcher.png"
+            convert app/Scannerz-Network-Icon.png -resize "${size}x${size}" "$dir/ic_launcher.png"
             cp "$dir/ic_launcher.png" "$dir/ic_launcher_round.png"
           done
-
-      - name: Apply launcher icon to manifest
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('app/src/main/AndroidManifest.xml')
-          s = p.read_text()
-          if 'android:icon="@mipmap/ic_launcher"' not in s:
-              s = s.replace(
-                  '<application ',
-                  '<application android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" ',
-                  1,
-              )
-          p.write_text(s)
-          PY
-          grep -n '<application' app/src/main/AndroidManifest.xml
 
       - name: Build debug APK
         run: gradle assembleDebug --stacktrace
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk Tri-State-Scanner-App.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk Scannerz-Network-App.apk
 
       - name: Upload branded APK
         uses: actions/upload-artifact@v4
         with:
-          name: Tri-State-Scanner-Branded
-          path: Tri-State-Scanner-App.apk
+          name: Scannerz-Network-Branded
+          path: Scannerz-Network-App.apk
 
       - name: Restore Google Play signing keystore
         if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
@@ -86,12 +67,12 @@ jobs:
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/tristate-release.jks"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/scannerz-network-release.jks"
 
       - name: Build signed Google Play AAB
         if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
         env:
-          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/tristate-release.jks
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/scannerz-network-release.jks
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
@@ -99,11 +80,11 @@ jobs:
 
       - name: Rename Google Play AAB
         if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
-        run: cp app/build/outputs/bundle/release/app-release.aab Tri-State-Scanner-Google-Play.aab
+        run: cp app/build/outputs/bundle/release/app-release.aab Scannerz-Network-Google-Play.aab
 
       - name: Upload Google Play AAB
         if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: Tri-State-Scanner-Google-Play
-          path: Tri-State-Scanner-Google-Play.aab
+          name: Scannerz-Network-Google-Play
+          path: Scannerz-Network-Google-Play.aab
