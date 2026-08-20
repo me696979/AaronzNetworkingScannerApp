@@ -104,6 +104,36 @@
                 android:paddingTop="6dp" />
         </LinearLayout>
 
+        <LinearLayout
+            android:id="@+id/announcementSection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:layout_marginTop="18dp"
+            android:background="#2B2410"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="📢 ANNOUNCEMENTS"
+                android:textColor="#FFD166"
+                android:textStyle="bold"
+                android:textSize="13sp"
+                android:fontFamily="monospace" />
+
+            <TextView
+                android:id="@+id/announcementText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#FFF1C7"
+                android:textSize="14sp"
+                android:fontFamily="monospace"
+                android:lineSpacingExtra="3dp"
+                android:paddingTop="8dp" />
+        </LinearLayout>
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
