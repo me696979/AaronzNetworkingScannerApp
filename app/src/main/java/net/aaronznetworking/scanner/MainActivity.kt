@@ -77,7 +77,6 @@ class MainActivity : AppCompatActivity() {
         renderRecentTranscripts()
         renderAnnouncements()
 
-        // Initial REST snapshot, then SSE supplies immediate changes.
         scope.launch {
             loadTalkgroups()
             updateAnnouncements()
@@ -141,11 +140,9 @@ class MainActivity : AppCompatActivity() {
                 } catch (_: CancellationException) {
                     throw CancellationException()
                 } catch (_: Exception) {
-                    // Connection can drop as phones change Wi-Fi/cellular. Reconnect automatically.
                 }
 
                 if (isActive) {
-                    // Re-sync after any disconnect so no Admin change is missed while offline.
                     withContext(Dispatchers.Main) {
                         loadTalkgroups()
                         updateAnnouncements()
@@ -343,11 +340,11 @@ class MainActivity : AppCompatActivity() {
             .setMessage(dialogText)
             .setPositiveButton("OK") { _, _ ->
                 unseen.forEach { seen.add(it.fingerprint) }
-                prefs.edit().putStringSet("seen_announcements", seen.takeLast(100).toSet()).apply()
+                prefs.edit().putStringSet("seen_announcements", seen.toList().takeLast(100).toSet()).apply()
             }
             .setOnDismissListener {
                 unseen.forEach { seen.add(it.fingerprint) }
-                prefs.edit().putStringSet("seen_announcements", seen.takeLast(100).toSet()).apply()
+                prefs.edit().putStringSet("seen_announcements", seen.toList().takeLast(100).toSet()).apply()
                 announcementDialogShowing = false
             }
             .show()
