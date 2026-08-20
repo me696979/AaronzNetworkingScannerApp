@@ -1,5 +1,5 @@
-# Rebuild trigger for fresh live-edge Android restart fix
-name: Build Branded Android APK
+# Build Android artifacts for direct testing and Google Play release
+name: Build Branded Android APK and AAB
 
 on:
   workflow_dispatch:
@@ -79,3 +79,31 @@ jobs:
         with:
           name: Tri-State-Scanner-Branded
           path: Tri-State-Scanner-App.apk
+
+      - name: Restore Google Play signing keystore
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/tristate-release.jks"
+
+      - name: Build signed Google Play AAB
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/tristate-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle bundleRelease --stacktrace
+
+      - name: Rename Google Play AAB
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: cp app/build/outputs/bundle/release/app-release.aab Tri-State-Scanner-Google-Play.aab
+
+      - name: Upload Google Play AAB
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tri-State-Scanner-Google-Play
+          path: Tri-State-Scanner-Google-Play.aab
