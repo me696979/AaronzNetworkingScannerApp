@@ -89,7 +89,7 @@
                 android:layout_height="wrap_content"
                 android:text="Scanning…"
                 android:textColor="#E9FFF0"
-                android:textSize="22sp"
+                android:textSize="20sp"
                 android:textStyle="bold"
                 android:fontFamily="monospace"
                 android:paddingTop="8dp" />
@@ -105,6 +105,161 @@
         </LinearLayout>
 
         <LinearLayout
+            android:id="@+id/weatherSection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:layout_marginTop="18dp"
+            android:background="#0A1B10">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="☁ LOCAL WEATHER"
+                android:textColor="#6CFF88"
+                android:textStyle="bold"
+                android:textSize="13sp"
+                android:fontFamily="monospace" />
+
+            <TextView
+                android:id="@+id/weatherLocation"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Choose a weather location"
+                android:textColor="#A8CDB0"
+                android:textSize="13sp"
+                android:fontFamily="monospace"
+                android:paddingTop="8dp" />
+
+            <TextView
+                android:id="@+id/weatherCurrent"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="--°   Waiting for location"
+                android:textColor="#E9FFF0"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace"
+                android:paddingTop="8dp" />
+
+            <TextView
+                android:id="@+id/weatherDetails"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textColor="#9BC8A6"
+                android:textSize="12sp"
+                android:fontFamily="monospace"
+                android:paddingTop="5dp" />
+
+            <TextView
+                android:id="@+id/weatherAlertsText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Weather alerts are disabled."
+                android:textColor="#6CFF88"
+                android:textSize="13sp"
+                android:fontFamily="monospace"
+                android:lineSpacingExtra="3dp"
+                android:paddingTop="12dp"
+                android:paddingBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="📍 WEATHER LOCATION"
+                android:textColor="#A8CDB0"
+                android:textStyle="bold"
+                android:textSize="12sp"
+                android:fontFamily="monospace"
+                android:paddingTop="8dp" />
+
+            <RadioGroup
+                android:id="@+id/weatherLocationGroup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingTop="4dp">
+
+                <RadioButton
+                    android:id="@+id/weatherUseLocation"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Use My Location"
+                    android:textColor="#D8F7DE"
+                    android:fontFamily="monospace" />
+
+                <RadioButton
+                    android:id="@+id/weatherUseZip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="ZIP Code"
+                    android:textColor="#D8F7DE"
+                    android:fontFamily="monospace" />
+            </RadioGroup>
+
+            <LinearLayout
+                android:id="@+id/weatherZipRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:visibility="gone"
+                android:paddingTop="6dp">
+
+                <EditText
+                    android:id="@+id/weatherZipCode"
+                    android:layout_width="100dp"
+                    android:layout_height="wrap_content"
+                    android:hint="ZIP"
+                    android:maxLength="5"
+                    android:inputType="number"
+                    android:singleLine="true"
+                    android:textColor="#E9FFF0"
+                    android:textColorHint="#6F8E76"
+                    android:backgroundTint="#6CFF88"
+                    android:fontFamily="monospace" />
+
+                <Button
+                    android:id="@+id/weatherZipSet"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="SET"
+                    android:textStyle="bold"
+                    android:textColor="#D8F7DE"
+                    android:backgroundTint="#173D20"
+                    android:layout_marginLeft="8dp" />
+            </LinearLayout>
+
+            <CheckBox
+                android:id="@+id/weatherAlertsEnabled"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Enable Local Weather Alerts"
+                android:textColor="#D8F7DE"
+                android:fontFamily="monospace"
+                android:paddingTop="8dp" />
+
+            <CheckBox
+                android:id="@+id/weatherAlertSoundEnabled"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Alert Sound + Spoken Warning"
+                android:textColor="#D8F7DE"
+                android:fontFamily="monospace" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Serious warnings can pause the scanner, play the alert tone and official NWS alert text, then return to the newest live calls."
+                android:textColor="#6F8E76"
+                android:textSize="10sp"
+                android:fontFamily="monospace"
+                android:paddingTop="6dp" />
+        </LinearLayout>
+
+        <LinearLayout
             android:id="@+id/announcementSection"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -114,65 +269,202 @@
             android:background="#2B2410"
             android:visibility="gone">
 
-            <TextView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="📢 ANNOUNCEMENTS"
-                android:textColor="#FFD166"
-                android:textStyle="bold"
-                android:textSize="13sp"
-                android:fontFamily="monospace" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
-            <TextView
-                android:id="@+id/announcementText"
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="📢 ANNOUNCEMENTS"
+                    android:textColor="#FFD166"
+                    android:textStyle="bold"
+                    android:textSize="13sp"
+                    android:fontFamily="monospace" />
+
+                <Button
+                    android:id="@+id/announcementCollapse"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:text="COLLAPSE"
+                    android:textSize="10sp"
+                    android:textColor="#FFF1C7"
+                    android:backgroundTint="#4B3A13" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/announcementContent"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textColor="#FFF1C7"
-                android:textSize="14sp"
-                android:fontFamily="monospace"
-                android:lineSpacingExtra="3dp"
-                android:paddingTop="8dp" />
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/announcementText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="#FFF1C7"
+                    android:textSize="14sp"
+                    android:fontFamily="monospace"
+                    android:lineSpacingExtra="3dp"
+                    android:paddingTop="8dp" />
+            </LinearLayout>
         </LinearLayout>
 
-        <TextView
+        <LinearLayout
+            android:id="@+id/transcriptSection"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="RECENT AI TRANSCRIPTS"
-            android:textColor="#6CFF88"
-            android:textStyle="bold"
-            android:fontFamily="monospace"
-            android:paddingTop="24dp" />
+            android:orientation="vertical"
+            android:paddingTop="20dp">
 
-        <TextView
-            android:id="@+id/transcript"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Waiting for completed transcripts…"
-            android:textColor="#E9FFF0"
-            android:textSize="15sp"
-            android:fontFamily="monospace"
-            android:lineSpacingExtra="3dp"
-            android:paddingTop="8dp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="ACTIVE ALERTS"
-            android:textColor="#FFB04A"
-            android:textStyle="bold"
-            android:fontFamily="monospace"
-            android:paddingTop="26dp" />
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="RECENT AI TRANSCRIPTS"
+                    android:textColor="#6CFF88"
+                    android:textStyle="bold"
+                    android:fontFamily="monospace" />
 
-        <TextView
-            android:id="@+id/alerts"
+                <Button
+                    android:id="@+id/transcriptCollapse"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:text="COLLAPSE"
+                    android:textSize="10sp"
+                    android:textColor="#D8F7DE"
+                    android:backgroundTint="#173D20" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/transcriptContent"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/transcript"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Waiting for completed transcripts…"
+                    android:textColor="#E9FFF0"
+                    android:textSize="15sp"
+                    android:fontFamily="monospace"
+                    android:lineSpacingExtra="3dp"
+                    android:paddingTop="8dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/alertsSection"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="No active major incidents"
-            android:textColor="#FFE0B0"
-            android:textSize="14sp"
-            android:fontFamily="monospace"
-            android:lineSpacingExtra="3dp"
-            android:paddingTop="8dp" />
+            android:orientation="vertical"
+            android:paddingTop="20dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="ACTIVE ALERTS"
+                    android:textColor="#FFB04A"
+                    android:textStyle="bold"
+                    android:fontFamily="monospace" />
+
+                <Button
+                    android:id="@+id/alertsCollapse"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:text="COLLAPSE"
+                    android:textSize="10sp"
+                    android:textColor="#FFE0B0"
+                    android:backgroundTint="#4A2B0A" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/alertsContent"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/alerts"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="No active major incidents"
+                    android:textColor="#FFE0B0"
+                    android:textSize="14sp"
+                    android:fontFamily="monospace"
+                    android:lineSpacingExtra="3dp"
+                    android:paddingTop="8dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/recentCallsSection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingTop="20dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="RECENT CALLS"
+                    android:textColor="#6CFF88"
+                    android:textStyle="bold"
+                    android:fontFamily="monospace" />
+
+                <Button
+                    android:id="@+id/recentCallsCollapse"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:text="COLLAPSE"
+                    android:textSize="10sp"
+                    android:textColor="#D8F7DE"
+                    android:backgroundTint="#173D20" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/recentCallsContent"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/recentCalls"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="No calls yet."
+                    android:textColor="#E9FFF0"
+                    android:textSize="14sp"
+                    android:fontFamily="monospace"
+                    android:lineSpacingExtra="3dp"
+                    android:paddingTop="8dp" />
+            </LinearLayout>
+        </LinearLayout>
 
         <TextView
             android:id="@+id/listeners"
