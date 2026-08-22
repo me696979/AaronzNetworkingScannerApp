@@ -11,16 +11,31 @@ class ScannerPlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+
         val player = ExoPlayer.Builder(this).build().apply {
-            setAudioAttributes(AudioAttributes.Builder().setContentType(C.AUDIO_CONTENT_TYPE_SPEECH).setUsage(C.USAGE_MEDIA).build(), true)
+            setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
+                    .setUsage(C.USAGE_MEDIA)
+                    .build(),
+                true
+            )
+            setHandleAudioBecomingNoisy(true)
+            setWakeMode(C.WAKE_MODE_NETWORK)
         }
+
         session = MediaSession.Builder(this, player).build()
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
+    override fun onGetSession(
+        controllerInfo: MediaSession.ControllerInfo
+    ): MediaSession? = session
 
     override fun onDestroy() {
-        session?.run { player.release(); release() }
+        session?.run {
+            player.release()
+            release()
+        }
         session = null
         super.onDestroy()
     }
