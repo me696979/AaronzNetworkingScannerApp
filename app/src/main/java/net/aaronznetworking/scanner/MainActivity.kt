@@ -1,23 +1,59 @@
 package net.aaronznetworking.scanner
 
+import android.Manifest
 import android.content.ComponentName
+import android.content.Context
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.media.AudioAttributes as PlatformAudioAttributes
+import android.media.MediaPlayer
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Bundle
+import android.os.Looper
+import android.speech.tts.TextToSpeech
 import android.view.View
 import android.widget.Button
+import android.widget.CheckBox
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.net.URLEncoder
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -41,19 +77,38 @@ class MainActivity : AppCompatActivity() {
     private var cursor: String? = null
     private var scannerJob: Job? = null
     private var liveEventsJob: Job? = null
+    private var weatherJob: Job? = null
     private var scannerGeneration = 0L
     private val listenerSessionId = "android-${UUID.randomUUID()}"
+
+    private var networkInterrupted = false
+    private var weatherInterrupting = false
+    private var weatherPolling = false
+    private var weatherRefreshPending = false
+    private var locationPermissionRequested = false
+    private var audioFocusLostAt = 0L
+
+    private var textToSpeech: TextToSpeech? = null
+    private var textToSpeechReady = false
 
     private data class TalkgroupOption(
         val id: Int,
         val name: String,
-        val agency: String
+        val talkgroupIds: String,
+        val allIds: Set<Int>
     )
 
     private data class TranscriptEntry(
         val id: String,
         val label: String,
         val text: String
+    )
+
+    private data class RecentCallEntry(
+        val id: String,
+        val label: String,
+        val tgid: String,
+        val time: String
     )
 
     private data class AnnouncementEntry(
@@ -67,16 +122,49 @@ class MainActivity : AppCompatActivity() {
             get() = "$id|$title|$message|$startsAt|$updatedAt"
     }
 
+    private data class WeatherPoint(
+        val lat: Double,
+        val lon: Double,
+        val city: String = "",
+        val state: String = ""
+    )
+
     private val talkgroups = mutableListOf<TalkgroupOption>()
     private val blockedTalkgroups = mutableSetOf<Int>()
     private val pendingTranscripts = linkedMapOf<String, String>()
     private val seenTranscriptIds = mutableSetOf<String>()
     private val recentTranscripts = mutableListOf<TranscriptEntry>()
+    private val recentCalls = mutableListOf<RecentCallEntry>()
     private val activeAnnouncements = mutableListOf<AnnouncementEntry>()
     private var announcementDialogShowing = false
 
     private val prefs by lazy {
         getSharedPreferences("scanner_prefs", MODE_PRIVATE)
+    }
+
+    private val connectivityManager by lazy {
+        getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    }
+
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onLost(network: Network) {
+            if (running) {
+                networkInterrupted = true
+                runOnUiThread {
+                    findViewById<TextView>(R.id.status).text =
+                        "Network interrupted — waiting to reconnect…"
+                }
+            }
+        }
+
+        override fun onAvailable(network: Network) {
+            if (running && networkInterrupted && !weatherInterrupting) {
+                networkInterrupted = false
+                scope.launch {
+                    restartScannerAtLiveEdge("Network restored — returning to live calls…")
+                }
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -90,6 +178,54 @@ class MainActivity : AppCompatActivity() {
                 ComponentName(this, ScannerPlaybackService::class.java)
             )
         ).buildAsync()
+
+        controllerFuture.addListener(
+            {
+                try {
+                    controllerFuture.get().addListener(object : Player.Listener {
+                        override fun onPlayWhenReadyChanged(
+                            playWhenReady: Boolean,
+                            reason: Int
+                        ) {
+                            if (
+                                !playWhenReady &&
+                                reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS &&
+                                running &&
+                                !weatherInterrupting
+                            ) {
+                                audioFocusLostAt = System.currentTimeMillis()
+                            }
+                        }
+
+                        override fun onIsPlayingChanged(isPlaying: Boolean) {
+                            if (isPlaying && audioFocusLostAt > 0 && running && !weatherInterrupting) {
+                                val interruptedFor = System.currentTimeMillis() - audioFocusLostAt
+                                audioFocusLostAt = 0L
+
+                                // Very short notification tones do not reset the scanner.
+                                // Longer phone/media interruptions return to the live edge.
+                                if (interruptedFor >= 2500) {
+                                    scope.launch {
+                                        restartScannerAtLiveEdge(
+                                            "Audio interruption ended — returning to live calls…"
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    })
+                } catch (_: Exception) {
+                }
+            },
+            ContextCompat.getMainExecutor(this)
+        )
+
+        textToSpeech = TextToSpeech(this) { status ->
+            textToSpeechReady = status == TextToSpeech.SUCCESS
+            if (textToSpeechReady) {
+                textToSpeech?.language = Locale.US
+            }
+        }
 
         findViewById<Button>(R.id.startButton).setOnClickListener {
             if (!running) startScanner() else stopScanner()
@@ -116,13 +252,22 @@ class MainActivity : AppCompatActivity() {
         }
 
         loadSavedBlockedTalkgroups()
+        setupCollapsibleSections()
+        setupWeatherControls()
         renderRecentTranscripts()
+        renderRecentCalls()
         renderAnnouncements()
         updateTalkgroupButton()
+
+        try {
+            connectivityManager.registerDefaultNetworkCallback(networkCallback)
+        } catch (_: Exception) {
+        }
 
         // Load each initial API independently so one failed request cannot block the other.
         scope.launch { loadTalkgroups() }
         scope.launch { updateAnnouncements() }
+        scope.launch { updateWeather() }
 
         startLiveEvents()
 
@@ -150,6 +295,29 @@ class MainActivity : AppCompatActivity() {
                 delay(1000)
             }
         }
+
+        weatherJob = scope.launch {
+            while (isActive) {
+                updateWeather()
+                delay(5000)
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+
+        if (
+            running &&
+            audioFocusLostAt > 0 &&
+            System.currentTimeMillis() - audioFocusLostAt >= 2500 &&
+            !weatherInterrupting
+        ) {
+            audioFocusLostAt = 0L
+            scope.launch {
+                restartScannerAtLiveEdge("Returning to live calls…")
+            }
+        }
     }
 
     private fun startLiveEvents() {
@@ -167,6 +335,10 @@ class MainActivity : AppCompatActivity() {
                     eventHttp.newCall(request).execute().use { response ->
                         if (!response.isSuccessful) {
                             throw IllegalStateException("SSE HTTP ${response.code}")
+                        }
+
+                        withContext(Dispatchers.Main) {
+                            launch { updateWeather() }
                         }
 
                         val source = response.body?.source()
@@ -208,10 +380,10 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 if (isActive) {
-                    // Re-sync after a dropped connection so a change is not missed.
                     withContext(Dispatchers.Main) {
                         launch { loadTalkgroups() }
                         launch { updateAnnouncements() }
+                        launch { updateWeather() }
                     }
                     delay(2000)
                 }
@@ -227,21 +399,38 @@ class MainActivity : AppCompatActivity() {
         }
 
         when (event.optString("type")) {
-            "talkgroups_changed" -> {
-                withContext(Dispatchers.Main) {
-                    loadTalkgroups()
-                }
+            "talkgroups_changed" -> withContext(Dispatchers.Main) {
+                loadTalkgroups()
             }
 
-            "announcements_changed" -> {
-                withContext(Dispatchers.Main) {
-                    updateAnnouncements()
-                }
+            "announcements_changed" -> withContext(Dispatchers.Main) {
+                updateAnnouncements()
+            }
+
+            "weather_test_changed" -> withContext(Dispatchers.Main) {
+                updateWeather()
             }
         }
     }
 
     private fun startScanner() {
+        running = true
+        findViewById<Button>(R.id.startButton).text = "STOP SCANNER"
+        findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
+        findViewById<TextView>(R.id.details).text = ""
+
+        scope.launch(Dispatchers.IO) {
+            sendListenerHeartbeat()
+        }
+
+        scope.launch {
+            restartScannerAtLiveEdge("Starting at live edge…")
+        }
+    }
+
+    private suspend fun restartScannerAtLiveEdge(message: String) {
+        if (!running) return
+
         scannerGeneration += 1
         val generation = scannerGeneration
 
@@ -250,59 +439,51 @@ class MainActivity : AppCompatActivity() {
         cursor = null
 
         if (controllerFuture.isDone) {
-            controllerFuture.get().stop()
-            controllerFuture.get().clearMediaItems()
+            try {
+                controllerFuture.get().stop()
+                controllerFuture.get().clearMediaItems()
+            } catch (_: Exception) {
+            }
         }
 
-        running = true
-        findViewById<Button>(R.id.startButton).text = "STOP SCANNER"
-        findViewById<TextView>(R.id.status).text = "Starting at live edge…"
+        findViewById<TextView>(R.id.status).text = message
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
 
         scannerJob = scope.launch {
-            withContext(Dispatchers.IO) {
-                sendListenerHeartbeat()
-            }
+            scannerLoop(generation)
+        }
+    }
 
-            val liveEdge = withContext(Dispatchers.IO) {
-                getJson("/api/call-queue/latest")
-                    ?.optString("latest_id")
-                    ?.takeIf { it.isNotBlank() && it != "null" }
-            }
-
-            if (!running || generation != scannerGeneration) {
-                return@launch
-            }
-
-            cursor = liveEdge
-
-            findViewById<TextView>(R.id.status).text =
-                if (cursor.isNullOrBlank()) {
-                    "Connecting to live calls…"
-                } else {
-                    "Waiting for next call…"
+    private suspend fun scannerLoop(generation: Long) {
+        while (currentCoroutineContext().isActive && running && generation == scannerGeneration) {
+            if (cursor.isNullOrBlank()) {
+                val liveEdge = withContext(Dispatchers.IO) {
+                    getJson("/api/call-queue/latest")
+                        ?.optString("latest_id")
+                        ?.takeIf { it.isNotBlank() && it != "null" }
                 }
 
-            while (isActive && running && generation == scannerGeneration) {
-                if (cursor.isNullOrBlank()) {
-                    val refreshedLiveEdge = withContext(Dispatchers.IO) {
-                        getJson("/api/call-queue/latest")
-                            ?.optString("latest_id")
-                            ?.takeIf { it.isNotBlank() && it != "null" }
-                    }
+                if (!running || generation != scannerGeneration) return
 
-                    if (!running || generation != scannerGeneration) {
-                        break
-                    }
-
-                    cursor = refreshedLiveEdge
-                } else {
-                    pollCalls(generation)
+                if (liveEdge.isNullOrBlank()) {
+                    findViewById<TextView>(R.id.status).text =
+                        if (networkInterrupted) {
+                            "Network interrupted — waiting to reconnect…"
+                        } else {
+                            "Connecting to live calls…"
+                        }
+                    delay(1500)
+                    continue
                 }
 
-                delay(1200)
+                cursor = liveEdge
+                findViewById<TextView>(R.id.status).text = "Waiting for next call…"
+            } else {
+                pollCalls(generation)
             }
+
+            delay(1000)
         }
     }
 
@@ -312,14 +493,18 @@ class MainActivity : AppCompatActivity() {
         scannerJob?.cancel()
         scannerJob = null
         cursor = null
+        audioFocusLostAt = 0L
 
         scope.launch(Dispatchers.IO) {
             sendListenerLeave()
         }
 
         if (controllerFuture.isDone) {
-            controllerFuture.get().stop()
-            controllerFuture.get().clearMediaItems()
+            try {
+                controllerFuture.get().stop()
+                controllerFuture.get().clearMediaItems()
+            } catch (_: Exception) {
+            }
         }
 
         findViewById<Button>(R.id.startButton).text = "START SCANNER"
@@ -329,22 +514,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private suspend fun pollCalls(generation: Long) {
-        if (!running || generation != scannerGeneration) return
+        if (!running || generation != scannerGeneration || weatherInterrupting) return
 
         val after = cursor ?: return
 
-        // Fetch the unfiltered server queue and apply this listener's choices locally.
-        // This prevents stale Redis preferences from blocking Android playback.
         val json = withContext(Dispatchers.IO) {
             getJson("/api/call-queue?limit=20&after=$after")
         } ?: return
 
-        if (!running || generation != scannerGeneration) return
+        if (!running || generation != scannerGeneration || weatherInterrupting) return
 
         val calls = json.optJSONArray("calls") ?: return
 
         for (i in 0 until calls.length()) {
-            if (!running || generation != scannerGeneration) break
+            if (!running || generation != scannerGeneration || weatherInterrupting) break
 
             val call = calls.getJSONObject(i)
             val callId = call.optString("id")
@@ -354,10 +537,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             val tg = call.optString("talkgroup").toIntOrNull()
-
-            if (tg != null && tg in blockedTalkgroups) {
-                continue
-            }
+            if (tg != null && isTalkgroupBlocked(tg)) continue
 
             playCallAndWait(call, generation)
         }
@@ -368,22 +548,24 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun isTalkgroupBlocked(tgid: Int): Boolean {
+        val managed = talkgroups.firstOrNull { tgid in it.allIds }
+        return if (managed != null) managed.id in blockedTalkgroups else tgid in blockedTalkgroups
+    }
+
     private suspend fun playCallAndWait(call: JSONObject, generation: Long) {
-        if (!running || generation != scannerGeneration) return
+        if (!running || generation != scannerGeneration || weatherInterrupting) return
 
         val controller = withContext(Dispatchers.IO) {
             controllerFuture.get()
         }
 
-        if (!running || generation != scannerGeneration) return
+        if (!running || generation != scannerGeneration || weatherInterrupting) return
 
         val label = call.optString(
             "talkgroupLabel",
             "Talkgroup ${call.optString("talkgroup")}"
         )
-
-        val frequency = formatFrequency(call.optString("frequency"))
-        val radio = call.optString("source")
         val tg = call.optString("talkgroup")
         val audioUrl = call.optString("audio_url")
         val callId = call.optString("id")
@@ -400,38 +582,86 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        findViewById<TextView>(R.id.nowPlaying).text = label
-        findViewById<TextView>(R.id.details).text =
-            "TGID $tg  •  $frequency  •  Radio $radio"
+        // Compact one-line app display: TGID + database/SDRTrunk-resolved name only.
+        findViewById<TextView>(R.id.nowPlaying).text = "TGID $tg • $label"
+        findViewById<TextView>(R.id.details).text = ""
         findViewById<TextView>(R.id.status).text = "Playing"
 
-        controller.setMediaItem(
-            MediaItem.fromUri(base + audioUrl)
-        )
+        controller.setMediaItem(MediaItem.fromUri(base + audioUrl))
         controller.prepare()
         controller.play()
+
+        var lastPosition = -1L
+        var lastProgressAt = System.currentTimeMillis()
+        var watchdogTriggered = false
 
         while (
             currentCoroutineContext().isActive &&
             running &&
             generation == scannerGeneration &&
+            !weatherInterrupting &&
             controller.playerError == null &&
             controller.playbackState != Player.STATE_ENDED
         ) {
-            delay(150)
+            val position = controller.currentPosition
+            if (position > lastPosition + 100) {
+                lastPosition = position
+                lastProgressAt = System.currentTimeMillis()
+            }
+
+            if (
+                audioFocusLostAt == 0L &&
+                System.currentTimeMillis() - lastProgressAt > 15000
+            ) {
+                watchdogTriggered = true
+                break
+            }
+
+            delay(200)
         }
 
-        if (!running || generation != scannerGeneration) return
+        if (!running || generation != scannerGeneration || weatherInterrupting) return
+
+        if (watchdogTriggered) {
+            controller.stop()
+            controller.clearMediaItems()
+            findViewById<TextView>(R.id.status).text =
+                "Audio stalled — returning to live calls…"
+            addRecentCall(callId, label, tg)
+            restartScannerAtLiveEdge("Audio recovered — waiting for next live call…")
+            return
+        }
 
         if (controller.playerError != null) {
             findViewById<TextView>(R.id.status).text =
-                "Audio error: ${controller.playerError?.errorCodeName ?: "unknown"}"
+                "Audio error — skipping call"
         } else {
             findViewById<TextView>(R.id.status).text = "Waiting for next call…"
         }
 
+        addRecentCall(callId, label, tg)
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
+    }
+
+    private fun addRecentCall(id: String, label: String, tgid: String) {
+        if (id.isBlank() || recentCalls.any { it.id == id }) return
+
+        val time = SimpleDateFormat("h:mm:ss a", Locale.US).format(Date())
+        recentCalls.add(0, RecentCallEntry(id, label, tgid, time))
+        while (recentCalls.size > 10) recentCalls.removeAt(recentCalls.lastIndex)
+        renderRecentCalls()
+    }
+
+    private fun renderRecentCalls() {
+        findViewById<TextView>(R.id.recentCalls).text =
+            if (recentCalls.isEmpty()) {
+                "No calls yet."
+            } else {
+                recentCalls.joinToString("\n") {
+                    "${it.time} • TGID ${it.tgid} • ${it.label}"
+                }
+            }
     }
 
     private suspend fun pollOnePendingTranscript() {
@@ -450,35 +680,27 @@ class MainActivity : AppCompatActivity() {
 
                 if (text.isNotBlank() && callId !in seenTranscriptIds) {
                     seenTranscriptIds.add(callId)
-                    recentTranscripts.add(
-                        0,
-                        TranscriptEntry(callId, label, text)
-                    )
-
+                    recentTranscripts.add(0, TranscriptEntry(callId, label, text))
                     while (recentTranscripts.size > 3) {
                         recentTranscripts.removeAt(recentTranscripts.lastIndex)
                     }
-
                     renderRecentTranscripts()
                 }
             }
 
-            "filtered", "error" -> {
-                pendingTranscripts.remove(callId)
-            }
+            "filtered", "error" -> pendingTranscripts.remove(callId)
         }
     }
 
     private fun renderRecentTranscripts() {
-        val transcriptView = findViewById<TextView>(R.id.transcript)
-
-        transcriptView.text = if (recentTranscripts.isEmpty()) {
-            "Waiting for completed transcripts…"
-        } else {
-            recentTranscripts.joinToString("\n\n") {
-                "${it.label}\n${it.text}"
+        findViewById<TextView>(R.id.transcript).text =
+            if (recentTranscripts.isEmpty()) {
+                "Waiting for completed transcripts…"
+            } else {
+                recentTranscripts.joinToString("\n\n") {
+                    "${it.label}\n${it.text}"
+                }
             }
-        }
     }
 
     private suspend fun updateAnnouncements() {
@@ -528,27 +750,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showNewAnnouncementPopup(items: List<AnnouncementEntry>) {
-        if (
-            items.isEmpty() ||
-            announcementDialogShowing ||
-            isFinishing ||
-            isDestroyed
-        ) {
-            return
-        }
+        if (items.isEmpty() || announcementDialogShowing || isFinishing || isDestroyed) return
 
         val seen = prefs.getStringSet("seen_announcements", emptySet())
-            .orEmpty()
-            .toMutableSet()
-
+            .orEmpty().toMutableSet()
         val unseen = items.filter { it.fingerprint !in seen }
-
         if (unseen.isEmpty()) return
 
-        val dialogText = unseen.joinToString("\n\n") {
-            "${it.title}\n${it.message}"
-        }
-
+        val dialogText = unseen.joinToString("\n\n") { "${it.title}\n${it.message}" }
         announcementDialogShowing = true
 
         AlertDialog.Builder(this)
@@ -557,19 +766,13 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("OK") { _, _ ->
                 unseen.forEach { seen.add(it.fingerprint) }
                 prefs.edit()
-                    .putStringSet(
-                        "seen_announcements",
-                        seen.toList().takeLast(100).toSet()
-                    )
+                    .putStringSet("seen_announcements", seen.toList().takeLast(100).toSet())
                     .apply()
             }
             .setOnDismissListener {
                 unseen.forEach { seen.add(it.fingerprint) }
                 prefs.edit()
-                    .putStringSet(
-                        "seen_announcements",
-                        seen.toList().takeLast(100).toSet()
-                    )
+                    .putStringSet("seen_announcements", seen.toList().takeLast(100).toSet())
                     .apply()
                 announcementDialogShowing = false
             }
@@ -589,17 +792,19 @@ class MainActivity : AppCompatActivity() {
             val id = tg.optInt("talkgroup_id", 0)
             if (id <= 0) continue
 
-            val agency = if (tg.isNull("agency")) {
-                ""
-            } else {
-                tg.optString("agency", "")
-            }
+            val idsText = tg.optString("talkgroup_ids", id.toString())
+                .trim().ifBlank { id.toString() }
+            val allIds = idsText.split(',')
+                .mapNotNull { it.trim().toIntOrNull() }
+                .toSet()
+                .ifEmpty { setOf(id) }
 
             incoming.add(
                 TalkgroupOption(
                     id = id,
                     name = tg.optString("name", "Talkgroup $id"),
-                    agency = agency
+                    talkgroupIds = idsText,
+                    allIds = allIds
                 )
             )
         }
@@ -607,7 +812,6 @@ class MainActivity : AppCompatActivity() {
         talkgroups.clear()
         talkgroups.addAll(incoming)
         updateTalkgroupButton()
-
         return incoming.isNotEmpty()
     }
 
@@ -615,23 +819,18 @@ class MainActivity : AppCompatActivity() {
         blockedTalkgroups.clear()
         blockedTalkgroups.addAll(
             prefs.getStringSet("blocked_talkgroups", emptySet())
-                .orEmpty()
-                .mapNotNull { it.toIntOrNull() }
+                .orEmpty().mapNotNull { it.toIntOrNull() }
         )
     }
 
     private fun saveBlockedTalkgroups() {
         prefs.edit()
-            .putStringSet(
-                "blocked_talkgroups",
-                blockedTalkgroups.map { it.toString() }.toSet()
-            )
+            .putStringSet("blocked_talkgroups", blockedTalkgroups.map { it.toString() }.toSet())
             .apply()
     }
 
     private fun updateTalkgroupButton() {
         val button = findViewById<Button>(R.id.talkgroupButton)
-
         if (talkgroups.isEmpty()) {
             button.text = "CHOOSE TALKGROUPS"
             return
@@ -640,7 +839,6 @@ class MainActivity : AppCompatActivity() {
         val existingIds = talkgroups.map { it.id }.toSet()
         val blockedExisting = blockedTalkgroups.count { it in existingIds }
         val enabled = (talkgroups.size - blockedExisting).coerceAtLeast(0)
-
         button.text = "TALKGROUPS: $enabled/${talkgroups.size} ENABLED"
     }
 
@@ -655,11 +853,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         val labels = talkgroups.map { tg ->
-            if (tg.agency.isBlank()) {
-                "${tg.name} (TG ${tg.id})"
-            } else {
-                "${tg.name} (TG ${tg.id})\n${tg.agency}"
-            }
+            val prefix = if (tg.talkgroupIds.contains(',')) "TGIDs" else "TGID"
+            "$prefix ${tg.talkgroupIds} • ${tg.name}"
         }.toTypedArray()
 
         val checked = BooleanArray(talkgroups.size) { index ->
@@ -673,28 +868,18 @@ class MainActivity : AppCompatActivity() {
             }
             .setPositiveButton("Save") { _, _ ->
                 blockedTalkgroups.clear()
-
                 for (i in talkgroups.indices) {
-                    if (!checked[i]) {
-                        blockedTalkgroups.add(talkgroups[i].id)
-                    }
+                    if (!checked[i]) blockedTalkgroups.add(talkgroups[i].id)
                 }
-
                 saveBlockedTalkgroups()
                 updateTalkgroupButton()
-
-                scope.launch(Dispatchers.IO) {
-                    pushListenerPreferences()
-                }
+                scope.launch(Dispatchers.IO) { pushListenerPreferences() }
             }
             .setNeutralButton("Enable All") { _, _ ->
                 blockedTalkgroups.clear()
                 saveBlockedTalkgroups()
                 updateTalkgroupButton()
-
-                scope.launch(Dispatchers.IO) {
-                    pushListenerPreferences()
-                }
+                scope.launch(Dispatchers.IO) { pushListenerPreferences() }
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -709,9 +894,7 @@ class MainActivity : AppCompatActivity() {
             .put("blocked_talkgroups", blocked)
             .toString()
 
-        val body = json.toRequestBody(
-            "application/json; charset=utf-8".toMediaType()
-        )
+        val body = json.toRequestBody("application/json; charset=utf-8".toMediaType())
 
         http.newCall(
             Request.Builder()
@@ -719,22 +902,445 @@ class MainActivity : AppCompatActivity() {
                 .put(body)
                 .build()
         ).execute().use { response ->
-            if (response.isSuccessful) {
-                JSONObject(response.body?.string() ?: "{}")
-            } else {
-                null
-            }
+            if (response.isSuccessful) JSONObject(response.body?.string() ?: "{}") else null
         }
     } catch (_: Exception) {
         null
     }
 
-    private fun formatFrequency(value: String): String {
-        return try {
-            val hz = value.toLong()
-            String.format("%.4f MHz", hz / 1_000_000.0)
+    private fun setupWeatherControls() {
+        val locationRadio = findViewById<RadioButton>(R.id.weatherUseLocation)
+        val zipRadio = findViewById<RadioButton>(R.id.weatherUseZip)
+        val zipRow = findViewById<LinearLayout>(R.id.weatherZipRow)
+        val zipInput = findViewById<EditText>(R.id.weatherZipCode)
+        val alertsEnabled = findViewById<CheckBox>(R.id.weatherAlertsEnabled)
+        val soundEnabled = findViewById<CheckBox>(R.id.weatherAlertSoundEnabled)
+
+        val mode = prefs.getString("weather_location_mode", "current") ?: "current"
+        locationRadio.isChecked = mode == "current"
+        zipRadio.isChecked = mode == "zip"
+        zipRow.visibility = if (mode == "zip") View.VISIBLE else View.GONE
+        zipInput.setText(prefs.getString("weather_zip", "") ?: "")
+
+        alertsEnabled.isChecked = prefs.getBoolean("weather_alerts_enabled", false)
+        soundEnabled.isChecked = prefs.getBoolean("weather_alert_sound_enabled", false)
+
+        findViewById<RadioGroup>(R.id.weatherLocationGroup).setOnCheckedChangeListener { _, checkedId ->
+            val newMode = if (checkedId == R.id.weatherUseZip) "zip" else "current"
+            prefs.edit().putString("weather_location_mode", newMode).apply()
+            zipRow.visibility = if (newMode == "zip") View.VISIBLE else View.GONE
+
+            if (newMode == "current") requestLocationPermissionIfNeeded()
+            scope.launch { updateWeather() }
+        }
+
+        findViewById<Button>(R.id.weatherZipSet).setOnClickListener {
+            val zip = zipInput.text.toString().trim()
+            if (!zip.matches(Regex("^\\d{5}$"))) {
+                findViewById<TextView>(R.id.weatherAlertsText).text =
+                    "Enter a valid 5-digit ZIP code."
+                return@setOnClickListener
+            }
+            prefs.edit()
+                .putString("weather_location_mode", "zip")
+                .putString("weather_zip", zip)
+                .apply()
+            zipRadio.isChecked = true
+            scope.launch { updateWeather() }
+        }
+
+        alertsEnabled.setOnCheckedChangeListener { _, checked ->
+            prefs.edit().putBoolean("weather_alerts_enabled", checked).apply()
+            if (!checked) {
+                findViewById<TextView>(R.id.weatherAlertsText).text =
+                    "Weather alerts are disabled."
+            }
+            scope.launch { updateWeather() }
+        }
+
+        soundEnabled.setOnCheckedChangeListener { _, checked ->
+            prefs.edit().putBoolean("weather_alert_sound_enabled", checked).apply()
+        }
+
+        if (mode == "current") requestLocationPermissionIfNeeded()
+    }
+
+    private fun requestLocationPermissionIfNeeded() {
+        if (
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        ) return
+
+        if (locationPermissionRequested) return
+        locationPermissionRequested = true
+
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ),
+            LOCATION_PERMISSION_REQUEST
+        )
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == LOCATION_PERMISSION_REQUEST) {
+            scope.launch { updateWeather() }
+        }
+    }
+
+    private suspend fun getWeatherPoint(): WeatherPoint? {
+        val mode = prefs.getString("weather_location_mode", "current") ?: "current"
+
+        if (mode == "zip") {
+            val zip = prefs.getString("weather_zip", "")?.trim().orEmpty()
+            if (!zip.matches(Regex("^\\d{5}$"))) return null
+
+            val encoded = URLEncoder.encode(zip, "UTF-8")
+            val data = withContext(Dispatchers.IO) {
+                getJson("/api/weather/location/zip?zip_code=$encoded")
+            } ?: return null
+
+            return WeatherPoint(
+                lat = data.optDouble("latitude"),
+                lon = data.optDouble("longitude"),
+                city = data.optString("city", ""),
+                state = data.optString("state_abbreviation", data.optString("state", ""))
+            )
+        }
+
+        if (
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
+        ) {
+            withContext(Dispatchers.Main) { requestLocationPermissionIfNeeded() }
+            return null
+        }
+
+        val location = getBestDeviceLocation() ?: return null
+        return WeatherPoint(location.latitude, location.longitude)
+    }
+
+    private suspend fun getBestDeviceLocation(): Location? = withContext(Dispatchers.Main) {
+        val manager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+
+        if (
+            ContextCompat.checkSelfPermission(
+                this@MainActivity,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(
+                this@MainActivity,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) return@withContext null
+
+        val providers = listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
+        val last = providers.mapNotNull { provider ->
+            try { manager.getLastKnownLocation(provider) } catch (_: Exception) { null }
+        }.maxByOrNull { it.time }
+
+        if (last != null) return@withContext last
+
+        val deferred = CompletableDeferred<Location?>()
+        val listener = object : LocationListener {
+            override fun onLocationChanged(location: Location) {
+                if (!deferred.isCompleted) deferred.complete(location)
+            }
+        }
+
+        val provider = providers.firstOrNull { manager.isProviderEnabled(it) }
+            ?: return@withContext null
+
+        try {
+            manager.requestSingleUpdate(provider, listener, Looper.getMainLooper())
         } catch (_: Exception) {
-            value
+            return@withContext null
+        }
+
+        val result = withTimeoutOrNull(8000) { deferred.await() }
+        try { manager.removeUpdates(listener) } catch (_: Exception) {}
+        result
+    }
+
+    private suspend fun updateWeather() {
+        if (weatherPolling) {
+            weatherRefreshPending = true
+            return
+        }
+
+        weatherPolling = true
+        try {
+            val point = getWeatherPoint()
+            if (point == null) {
+                findViewById<TextView>(R.id.weatherLocation).text =
+                    "Allow location access or enter a ZIP code"
+                findViewById<TextView>(R.id.weatherCurrent).text =
+                    "--°   Waiting for location"
+                return
+            }
+
+            val current = withContext(Dispatchers.IO) {
+                getJson("/api/weather/current?lat=${point.lat}&lon=${point.lon}")
+            }
+
+            if (current != null) {
+                val location = current.optJSONObject("location")
+                val city = point.city.ifBlank { location?.optString("city", "") ?: "" }
+                val state = point.state.ifBlank { location?.optString("state", "") ?: "" }
+                findViewById<TextView>(R.id.weatherLocation).text =
+                    listOf(city, state).filter { it.isNotBlank() }.joinToString(", ")
+                        .ifBlank { "Current Location" }
+
+                val temp = if (current.has("temperature") && !current.isNull("temperature")) {
+                    current.optInt("temperature").toString() + "°" + current.optString("temperature_unit", "F")
+                } else "--°"
+                val condition = current.optString("condition", "Weather unavailable")
+                findViewById<TextView>(R.id.weatherCurrent).text = "$temp   $condition"
+
+                val details = mutableListOf<String>()
+                if (current.has("humidity") && !current.isNull("humidity")) {
+                    details.add("Humidity ${current.optDouble("humidity").toInt()}%")
+                }
+                val wind = listOf(
+                    current.optString("wind_direction", ""),
+                    current.optString("wind_speed", "")
+                ).filter { it.isNotBlank() }.joinToString(" ")
+                if (wind.isNotBlank()) details.add("Wind $wind")
+                findViewById<TextView>(R.id.weatherDetails).text = details.joinToString(" • ")
+            }
+
+            if (!prefs.getBoolean("weather_alerts_enabled", false)) {
+                findViewById<TextView>(R.id.weatherAlertsText).text =
+                    "Weather alerts are disabled."
+                return
+            }
+
+            val alertsData = withContext(Dispatchers.IO) {
+                getJson("/api/weather/alerts?lat=${point.lat}&lon=${point.lon}")
+            } ?: return
+
+            val alerts = alertsData.optJSONArray("alerts")
+            if (alerts == null || alerts.length() == 0) {
+                findViewById<TextView>(R.id.weatherAlertsText).text =
+                    "✓ No active weather alerts\nNational Weather Service"
+                return
+            }
+
+            val display = mutableListOf<String>()
+            val newSerious = mutableListOf<JSONObject>()
+            val seen = prefs.getStringSet("seen_weather_alert_ids", emptySet())
+                .orEmpty().toMutableSet()
+
+            for (i in 0 until alerts.length()) {
+                val alert = alerts.getJSONObject(i)
+                val id = weatherAlertId(alert)
+                val event = alert.optString("event", "Weather Alert")
+                val area = alert.optString("area", "")
+                val headline = alert.optString("headline", "")
+                val severity = alert.optString("severity", "")
+
+                display.add(
+                    buildList {
+                        add("⚠ $event")
+                        if (area.isNotBlank()) add(area)
+                        if (severity.isNotBlank()) add(severity)
+                        if (headline.isNotBlank()) add(headline)
+                    }.joinToString("\n")
+                )
+
+                if (id !in seen && weatherAlertShouldInterrupt(alert)) {
+                    newSerious.add(alert)
+                }
+                if (id.isNotBlank()) seen.add(id)
+            }
+
+            findViewById<TextView>(R.id.weatherAlertsText).text =
+                display.joinToString("\n\n")
+
+            prefs.edit()
+                .putStringSet("seen_weather_alert_ids", seen.toList().takeLast(200).toSet())
+                .apply()
+
+            if (
+                newSerious.isNotEmpty() &&
+                prefs.getBoolean("weather_alert_sound_enabled", false)
+            ) {
+                runWeatherAlertInterruption(newSerious.first())
+            }
+        } finally {
+            weatherPolling = false
+            if (weatherRefreshPending) {
+                weatherRefreshPending = false
+                scope.launch { updateWeather() }
+            }
+        }
+    }
+
+    private fun weatherAlertId(alert: JSONObject): String {
+        return alert.optString("id").ifBlank {
+            listOf(
+                alert.optString("event"),
+                alert.optString("area"),
+                alert.optString("effective"),
+                alert.optString("expires")
+            ).joinToString("|")
+        }
+    }
+
+    private fun weatherAlertShouldInterrupt(alert: JSONObject): Boolean {
+        val severity = alert.optString("severity").lowercase(Locale.US)
+        val event = alert.optString("event").lowercase(Locale.US)
+        return severity == "extreme" || severity == "severe" ||
+            event.contains("warning") || event.contains("emergency")
+    }
+
+    private suspend fun runWeatherAlertInterruption(alert: JSONObject) {
+        if (weatherInterrupting) return
+        weatherInterrupting = true
+        val scannerWasRunning = running
+
+        try {
+            if (scannerWasRunning) {
+                scannerGeneration += 1
+                scannerJob?.cancel()
+                scannerJob = null
+                cursor = null
+                if (controllerFuture.isDone) {
+                    try {
+                        controllerFuture.get().stop()
+                        controllerFuture.get().clearMediaItems()
+                    } catch (_: Exception) {}
+                }
+            }
+
+            findViewById<TextView>(R.id.status).text =
+                "${alert.optString("event", "Weather warning")} — WEATHER ALERT"
+
+            playWeatherAlertTone()
+            speakOfficialWeatherAlert(alert)
+        } finally {
+            weatherInterrupting = false
+
+            if (scannerWasRunning && running) {
+                restartScannerAtLiveEdge("Weather alert complete — returning to live calls…")
+            }
+        }
+    }
+
+    private suspend fun playWeatherAlertTone() {
+        withContext(Dispatchers.Main) {
+            val done = CompletableDeferred<Unit>()
+            val player = MediaPlayer()
+
+            try {
+                player.setAudioAttributes(
+                    PlatformAudioAttributes.Builder()
+                        .setUsage(PlatformAudioAttributes.USAGE_ALARM)
+                        .setContentType(PlatformAudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                player.setDataSource(base + "/weather-alert.wav?v=7")
+                player.setVolume(1f, 1f)
+                player.setOnPreparedListener { it.start() }
+                player.setOnCompletionListener {
+                    it.release()
+                    if (!done.isCompleted) done.complete(Unit)
+                }
+                player.setOnErrorListener { mp, _, _ ->
+                    try { mp.release() } catch (_: Exception) {}
+                    if (!done.isCompleted) done.complete(Unit)
+                    true
+                }
+                player.prepareAsync()
+            } catch (_: Exception) {
+                try { player.release() } catch (_: Exception) {}
+                if (!done.isCompleted) done.complete(Unit)
+            }
+
+            withTimeoutOrNull(12000) { done.await() }
+        }
+    }
+
+    private suspend fun speakOfficialWeatherAlert(alert: JSONObject) {
+        if (!textToSpeechReady) return
+
+        // Do not paraphrase safety-critical content. Speak only official fields
+        // returned by NWS (or the explicitly marked Admin test fields).
+        val parts = mutableListOf<String>()
+        listOf(
+            alert.optString("event", ""),
+            alert.optString("area", ""),
+            alert.optString("headline", ""),
+            alert.optString("instruction", "").ifBlank {
+                alert.optString("description", "")
+            }
+        ).forEach { value ->
+            val clean = value.replace(Regex("\\s+"), " ").trim()
+            if (clean.isNotBlank() && clean !in parts) parts.add(clean)
+        }
+
+        if (parts.isEmpty()) return
+        val spoken = parts.joinToString(". ")
+
+        withContext(Dispatchers.Main) {
+            textToSpeech?.speak(
+                spoken,
+                TextToSpeech.QUEUE_FLUSH,
+                null,
+                "weather-${System.currentTimeMillis()}"
+            )
+        }
+
+        withTimeoutOrNull(60000) {
+            while (textToSpeech?.isSpeaking == true) delay(200)
+        }
+    }
+
+    private fun setupCollapsibleSections() {
+        setupCollapse(
+            R.id.announcementCollapse,
+            R.id.announcementContent,
+            "collapse_announcements"
+        )
+        setupCollapse(
+            R.id.transcriptCollapse,
+            R.id.transcriptContent,
+            "collapse_transcripts"
+        )
+        setupCollapse(
+            R.id.alertsCollapse,
+            R.id.alertsContent,
+            "collapse_alerts"
+        )
+        setupCollapse(
+            R.id.recentCallsCollapse,
+            R.id.recentCallsContent,
+            "collapse_recent_calls"
+        )
+    }
+
+    private fun setupCollapse(buttonId: Int, contentId: Int, key: String) {
+        val button = findViewById<Button>(buttonId)
+        val content = findViewById<View>(contentId)
+
+        fun applyState(collapsed: Boolean) {
+            content.visibility = if (collapsed) View.GONE else View.VISIBLE
+            button.text = if (collapsed) "EXPAND" else "COLLAPSE"
+        }
+
+        applyState(prefs.getBoolean(key, false))
+
+        button.setOnClickListener {
+            val collapsed = content.visibility != View.GONE
+            prefs.edit().putBoolean(key, collapsed).apply()
+            applyState(collapsed)
         }
     }
 
@@ -759,7 +1365,6 @@ class MainActivity : AppCompatActivity() {
             }
 
             val arr = alertsJson?.optJSONArray("alerts")
-
             findViewById<TextView>(R.id.alerts).text =
                 if (arr == null || arr.length() == 0) {
                     "No active major incidents"
@@ -767,11 +1372,8 @@ class MainActivity : AppCompatActivity() {
                     (0 until arr.length()).joinToString("\n\n") { i ->
                         val a = arr.getJSONObject(i)
                         val keywords = a.optJSONArray("keywords")?.let { k ->
-                            (0 until k.length()).joinToString(", ") {
-                                k.getString(it)
-                            }
+                            (0 until k.length()).joinToString(", ") { k.getString(it) }
                         } ?: "Alert"
-
                         "🚨 ${a.optString("talkgroupLabel")}\n$keywords\n${a.optString("transcript")}"
                     }
                 }
@@ -792,9 +1394,7 @@ class MainActivity : AppCompatActivity() {
             .put("platform", "android")
             .toString()
 
-        val body = json.toRequestBody(
-            "application/json; charset=utf-8".toMediaType()
-        )
+        val body = json.toRequestBody("application/json; charset=utf-8".toMediaType())
 
         http.newCall(
             Request.Builder()
@@ -802,11 +1402,7 @@ class MainActivity : AppCompatActivity() {
                 .post(body)
                 .build()
         ).execute().use { response ->
-            if (response.isSuccessful) {
-                JSONObject(response.body?.string() ?: "{}")
-            } else {
-                null
-            }
+            if (response.isSuccessful) JSONObject(response.body?.string() ?: "{}") else null
         }
     } catch (_: Exception) {
         null
@@ -819,11 +1415,7 @@ class MainActivity : AppCompatActivity() {
                 .cacheControl(okhttp3.CacheControl.FORCE_NETWORK)
                 .build()
         ).execute().use { response ->
-            if (response.isSuccessful) {
-                JSONObject(response.body?.string() ?: "{}")
-            } else {
-                null
-            }
+            if (response.isSuccessful) JSONObject(response.body?.string() ?: "{}") else null
         }
     } catch (_: Exception) {
         null
@@ -836,19 +1428,37 @@ class MainActivity : AppCompatActivity() {
         scannerJob = null
         liveEventsJob?.cancel()
         liveEventsJob = null
+        weatherJob?.cancel()
+        weatherJob = null
         cursor = null
+
+        try {
+            connectivityManager.unregisterNetworkCallback(networkCallback)
+        } catch (_: Exception) {
+        }
 
         runBlocking(Dispatchers.IO) {
             sendListenerLeave()
         }
 
         if (controllerFuture.isDone) {
-            controllerFuture.get().stop()
-            controllerFuture.get().clearMediaItems()
+            try {
+                controllerFuture.get().stop()
+                controllerFuture.get().clearMediaItems()
+            } catch (_: Exception) {
+            }
         }
+
+        textToSpeech?.stop()
+        textToSpeech?.shutdown()
+        textToSpeech = null
 
         MediaController.releaseFuture(controllerFuture)
         scope.cancel()
         super.onDestroy()
+    }
+
+    companion object {
+        private const val LOCATION_PERMISSION_REQUEST = 2001
     }
 }
