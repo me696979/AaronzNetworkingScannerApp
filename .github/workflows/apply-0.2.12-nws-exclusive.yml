@@ -1,0 +1,254 @@
+name: Apply 0.2.12 NWS Exclusive Update
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-0.2.12-nws-exclusive.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply Android 0.2.12 updates
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # ------------------------------------------------------------
+          # Android version / API 36
+          # ------------------------------------------------------------
+          gradle = Path('app/build.gradle.kts')
+          g = gradle.read_text()
+          g = g.replace('compileSdk = 35', 'compileSdk = 36', 1)
+          g = g.replace('targetSdk = 35', 'targetSdk = 36', 1)
+          g = g.replace('versionCode = 13', 'versionCode = 14', 1)
+          g = g.replace('versionName = "0.2.11"', 'versionName = "0.2.12"', 1)
+          gradle.write_text(g)
+
+          # ------------------------------------------------------------
+          # Match the web player's manual Weather Radio behavior:
+          # selecting TG 5500 makes it exclusive; deselecting it restores
+          # the listener's exact previous talkgroup selections.
+          # ------------------------------------------------------------
+          p = Path('app/src/main/java/net/aaronznetworking/scanner/MainActivity.kt')
+          s = p.read_text()
+
+          old = '''    private fun showTalkgroupDialog() {
+              if (talkgroups.isEmpty()) {
+                  AlertDialog.Builder(this)
+                      .setTitle("Talkgroups")
+                      .setMessage("No talkgroups are currently available.")
+                      .setPositiveButton("OK", null)
+                      .show()
+                  return
+              }
+
+              val labels = talkgroups.map { tg ->
+                  val prefix = if (tg.talkgroupIds.contains(',')) "TGIDs" else "TGID"
+                  "$prefix ${tg.talkgroupIds} • ${tg.name}"
+              }.toTypedArray()
+
+              val checked = BooleanArray(talkgroups.size) { index ->
+                  talkgroups[index].id !in blockedTalkgroups
+              }
+
+              AlertDialog.Builder(this)
+                  .setTitle("Choose Talkgroups")
+                  .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+                      checked[which] = isChecked
+                  }
+                  .setPositiveButton("Save") { _, _ ->
+                      blockedTalkgroups.clear()
+                      for (i in talkgroups.indices) {
+                          if (!checked[i]) blockedTalkgroups.add(talkgroups[i].id)
+                      }
+                      saveBlockedTalkgroups()
+                      updateTalkgroupButton()
+                      scope.launch(Dispatchers.IO) { pushListenerPreferences() }
+                  }
+                  .setNeutralButton("Enable All") { _, _ ->
+                      blockedTalkgroups.clear()
+                      saveBlockedTalkgroups()
+                      updateTalkgroupButton()
+                      scope.launch(Dispatchers.IO) { pushListenerPreferences() }
+                  }
+                  .setNegativeButton("Cancel", null)
+                  .show()
+          }'''
+
+          new = '''    private fun showTalkgroupDialog() {
+              if (talkgroups.isEmpty()) {
+                  AlertDialog.Builder(this)
+                      .setTitle("Talkgroups")
+                      .setMessage("No talkgroups are currently available.")
+                      .setPositiveButton("OK", null)
+                      .show()
+                  return
+              }
+
+              val labels = talkgroups.map { tg ->
+                  val prefix = if (tg.talkgroupIds.contains(',')) "TGIDs" else "TGID"
+                  "$prefix ${tg.talkgroupIds} • ${tg.name}"
+              }.toTypedArray()
+
+              val checked = BooleanArray(talkgroups.size) { index ->
+                  talkgroups[index].id !in blockedTalkgroups
+              }
+
+              val nwsIndex = talkgroups.indexOfFirst {
+                  WeatherTakeoverConfig.NWS_TALKGROUP.toIntOrNull() in it.allIds
+              }
+
+              /*
+               * Manual Weather Radio is exclusive, exactly like the web
+               * player. Preserve the listener's previous choices so they
+               * can be restored when TG 5500 is unchecked.
+               */
+              var preNwsChecked: BooleanArray? = null
+
+              if (nwsIndex >= 0 && checked[nwsIndex]) {
+                  val savedEnabled = prefs.getStringSet(
+                      "pre_nws_enabled_talkgroups",
+                      emptySet()
+                  ).orEmpty().mapNotNull { it.toIntOrNull() }.toSet()
+
+                  if (savedEnabled.isNotEmpty()) {
+                      preNwsChecked = BooleanArray(talkgroups.size) { index ->
+                          talkgroups[index].id in savedEnabled
+                      }
+                  }
+
+                  for (i in checked.indices) {
+                      checked[i] = i == nwsIndex
+                  }
+              }
+
+              lateinit var dialog: AlertDialog
+
+              dialog = AlertDialog.Builder(this)
+                  .setTitle("Choose Talkgroups")
+                  .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+                      if (nwsIndex >= 0 && which == nwsIndex) {
+                          if (isChecked) {
+                              /* Save the current normal scanner choices. */
+                              preNwsChecked = checked.copyOf().also {
+                                  it[nwsIndex] = false
+                              }
+
+                              val enabledBeforeNws = mutableSetOf<String>()
+                              preNwsChecked?.forEachIndexed { index, enabled ->
+                                  if (enabled) {
+                                      enabledBeforeNws.add(
+                                          talkgroups[index].id.toString()
+                                      )
+                                  }
+                              }
+
+                              prefs.edit()
+                                  .putStringSet(
+                                      "pre_nws_enabled_talkgroups",
+                                      enabledBeforeNws
+                                  )
+                                  .apply()
+
+                              for (i in checked.indices) {
+                                  checked[i] = i == nwsIndex
+                                  dialog.listView.setItemChecked(i, checked[i])
+                              }
+                          } else {
+                              /* Restore exactly what was selected before NWS. */
+                              val restore = preNwsChecked
+                              if (restore != null) {
+                                  for (i in checked.indices) {
+                                      checked[i] = restore[i]
+                                      dialog.listView.setItemChecked(i, checked[i])
+                                  }
+                              } else {
+                                  for (i in checked.indices) {
+                                      checked[i] = i != nwsIndex
+                                      dialog.listView.setItemChecked(i, checked[i])
+                                  }
+                              }
+
+                              prefs.edit()
+                                  .remove("pre_nws_enabled_talkgroups")
+                                  .apply()
+                          }
+                      } else {
+                          checked[which] = isChecked
+
+                          /* Any normal TG selection turns manual NWS off. */
+                          if (nwsIndex >= 0 && isChecked && checked[nwsIndex]) {
+                              checked[nwsIndex] = false
+                              dialog.listView.setItemChecked(nwsIndex, false)
+                              prefs.edit()
+                                  .remove("pre_nws_enabled_talkgroups")
+                                  .apply()
+                          }
+                      }
+                  }
+                  .setPositiveButton("Save") { _, _ ->
+                      blockedTalkgroups.clear()
+                      for (i in talkgroups.indices) {
+                          if (!checked[i]) blockedTalkgroups.add(talkgroups[i].id)
+                      }
+                      saveBlockedTalkgroups()
+                      updateTalkgroupButton()
+                      scope.launch(Dispatchers.IO) { pushListenerPreferences() }
+
+                      if (running) {
+                          scope.launch {
+                              restartScannerAtLiveEdge(
+                                  if (nwsIndex >= 0 && checked[nwsIndex]) {
+                                      "Weather Radio selected — listening to NWS only…"
+                                  } else {
+                                      "Talkgroup choices updated — returning to live calls…"
+                                  }
+                              )
+                          }
+                      }
+                  }
+                  .setNeutralButton("Enable All") { _, _ ->
+                      blockedTalkgroups.clear()
+                      prefs.edit()
+                          .remove("pre_nws_enabled_talkgroups")
+                          .apply()
+                      saveBlockedTalkgroups()
+                      updateTalkgroupButton()
+                      scope.launch(Dispatchers.IO) { pushListenerPreferences() }
+                      if (running) {
+                          scope.launch {
+                              restartScannerAtLiveEdge(
+                                  "All talkgroups enabled — returning to live calls…"
+                              )
+                          }
+                      }
+                  }
+                  .setNegativeButton("Cancel", null)
+                  .create()
+
+              dialog.show()
+          }'''
+
+          if old not in s:
+              raise SystemExit('ERROR: showTalkgroupDialog block not found')
+
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          print('Applied 0.2.12: API 36 + exclusive/restoring manual NWS TG 5500 behavior')
+          PY
+
+      - name: Commit update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/build.gradle.kts app/src/main/java/net/aaronznetworking/scanner/MainActivity.kt
+          git commit -m "Update Scannerz Network 0.2.12 NWS selection behavior"
+          git push
