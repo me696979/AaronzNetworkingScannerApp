@@ -86,6 +86,8 @@ class MainActivity : AppCompatActivity() {
     private var weatherPolling = false
     private var weatherRefreshPending = false
     private var locationPermissionRequested = false
+    private var lastWeatherTakeoverAt = 0L
+    private var activeSeriousWeatherAlert: JSONObject? = null
     private var audioFocusLostAt = 0L
 
     private var textToSpeech: TextToSpeech? = null
@@ -915,6 +917,8 @@ class MainActivity : AppCompatActivity() {
         val zipInput = findViewById<EditText>(R.id.weatherZipCode)
         val alertsEnabled = findViewById<CheckBox>(R.id.weatherAlertsEnabled)
         val soundEnabled = findViewById<CheckBox>(R.id.weatherAlertSoundEnabled)
+        val speechEnabled = findViewById<CheckBox>(R.id.weatherAlertSpeechEnabled)
+        val repeatEnabled = findViewById<CheckBox>(R.id.weatherNwsRepeatEnabled)
 
         val mode = prefs.getString("weather_location_mode", "current") ?: "current"
         locationRadio.isChecked = mode == "current"
@@ -924,6 +928,8 @@ class MainActivity : AppCompatActivity() {
 
         alertsEnabled.isChecked = prefs.getBoolean("weather_alerts_enabled", false)
         soundEnabled.isChecked = prefs.getBoolean("weather_alert_sound_enabled", false)
+        speechEnabled.isChecked = prefs.getBoolean("weather_alert_speech_enabled", true)
+        repeatEnabled.isChecked = prefs.getBoolean("weather_nws_repeat_enabled", true)
 
         findViewById<RadioGroup>(R.id.weatherLocationGroup).setOnCheckedChangeListener { _, checkedId ->
             val newMode = if (checkedId == R.id.weatherUseZip) "zip" else "current"
@@ -960,6 +966,14 @@ class MainActivity : AppCompatActivity() {
 
         soundEnabled.setOnCheckedChangeListener { _, checked ->
             prefs.edit().putBoolean("weather_alert_sound_enabled", checked).apply()
+        }
+
+        speechEnabled.setOnCheckedChangeListener { _, checked ->
+            prefs.edit().putBoolean("weather_alert_speech_enabled", checked).apply()
+        }
+
+        repeatEnabled.setOnCheckedChangeListener { _, checked ->
+            prefs.edit().putBoolean("weather_nws_repeat_enabled", checked).apply()
         }
 
         if (mode == "current") requestLocationPermissionIfNeeded()
@@ -1168,11 +1182,31 @@ class MainActivity : AppCompatActivity() {
                 .putStringSet("seen_weather_alert_ids", seen.toList().takeLast(200).toSet())
                 .apply()
 
-            if (
-                newSerious.isNotEmpty() &&
-                prefs.getBoolean("weather_alert_sound_enabled", false)
-            ) {
-                runWeatherAlertInterruption(newSerious.first())
+            val seriousActive = (0 until alerts.length())
+                .map { alerts.getJSONObject(it) }
+                .firstOrNull { weatherAlertShouldInterrupt(it) }
+
+            activeSeriousWeatherAlert = seriousActive
+
+            val now = System.currentTimeMillis()
+            val repeatDue =
+                seriousActive != null &&
+                prefs.getBoolean("weather_nws_repeat_enabled", true) &&
+                lastWeatherTakeoverAt > 0L &&
+                now - lastWeatherTakeoverAt >= WeatherTakeoverConfig.REPEAT_MS
+
+            when {
+                newSerious.isNotEmpty() ->
+                    runWeatherAlertInterruption(
+                        newSerious.first(),
+                        initial = true
+                    )
+
+                repeatDue ->
+                    runWeatherAlertInterruption(
+                        seriousActive!!,
+                        initial = false
+                    )
             }
         } finally {
             weatherPolling = false
@@ -1201,9 +1235,13 @@ class MainActivity : AppCompatActivity() {
             event.contains("warning") || event.contains("emergency")
     }
 
-    private suspend fun runWeatherAlertInterruption(alert: JSONObject) {
+    private suspend fun runWeatherAlertInterruption(
+        alert: JSONObject,
+        initial: Boolean
+    ) {
         if (weatherInterrupting) return
         weatherInterrupting = true
+        lastWeatherTakeoverAt = System.currentTimeMillis()
         val scannerWasRunning = running
 
         try {
@@ -1223,14 +1261,70 @@ class MainActivity : AppCompatActivity() {
             findViewById<TextView>(R.id.status).text =
                 "${alert.optString("event", "Weather warning")} — WEATHER ALERT"
 
-            playWeatherAlertTone()
-            speakOfficialWeatherAlert(alert)
+            if (initial && prefs.getBoolean("weather_alert_sound_enabled", false)) {
+                playWeatherAlertTone()
+            }
+
+            if (initial && prefs.getBoolean("weather_alert_speech_enabled", true)) {
+                speakOfficialWeatherAlert(alert)
+            }
+
+            if (scannerWasRunning && running) {
+                playLatestNwsSegment()
+            }
         } finally {
             weatherInterrupting = false
 
             if (scannerWasRunning && running) {
-                restartScannerAtLiveEdge("Weather alert complete — returning to live calls…")
+                restartScannerAtLiveEdge(
+                    "Weather alert complete — returning to live calls…"
+                )
             }
+        }
+    }
+
+    private suspend fun playLatestNwsSegment() {
+        findViewById<TextView>(R.id.status).text =
+            "Weather alert — switching to NWS Weather Radio…"
+
+        val data = withContext(Dispatchers.IO) {
+            getJson(WeatherTakeoverConfig.LATEST_NWS_PATH)
+        } ?: return
+
+        val call = data.optJSONObject("call") ?: return
+        val audioUrl = call.optString("audio_url")
+        if (audioUrl.isBlank()) return
+
+        val controller = withContext(Dispatchers.IO) {
+            controllerFuture.get()
+        }
+
+        findViewById<TextView>(R.id.nowPlaying).text =
+            call.optString("talkgroupLabel", "National Weather Service")
+        findViewById<TextView>(R.id.details).text =
+            "TGID ${call.optString("talkgroup", WeatherTakeoverConfig.NWS_TALKGROUP)} • ${call.optString("frequency", "")}"
+
+        val finished = CompletableDeferred<Unit>()
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED && !finished.isCompleted) {
+                    finished.complete(Unit)
+                }
+            }
+        }
+
+        controller.addListener(listener)
+        try {
+            controller.setMediaItem(MediaItem.fromUri(base + audioUrl))
+            controller.prepare()
+            controller.play()
+            withTimeoutOrNull(WeatherTakeoverConfig.TAKEOVER_MS) {
+                finished.await()
+            }
+        } finally {
+            controller.removeListener(listener)
+            controller.stop()
+            controller.clearMediaItems()
         }
     }
 

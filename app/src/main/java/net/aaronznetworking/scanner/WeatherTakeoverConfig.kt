@@ -14,6 +14,6 @@ object WeatherTakeoverConfig {
     const val LATEST_NWS_PATH =
         "/api/call-queue/latest-talkgroup?talkgroup=5500&max_age_seconds=300"
 
-    const val TAKEOVER_MS = 180_000L
+    const val TAKEOVER_MS = 90_000L
     const val REPEAT_MS = 300_000L
 }

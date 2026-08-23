@@ -245,14 +245,30 @@
                 android:id="@+id/weatherAlertSoundEnabled"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Alert Sound + Spoken Warning"
+                android:text="Alert Sound"
+                android:textColor="#D8F7DE"
+                android:fontFamily="monospace" />
+
+            <CheckBox
+                android:id="@+id/weatherAlertSpeechEnabled"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Read Weather Alerts Aloud"
+                android:textColor="#D8F7DE"
+                android:fontFamily="monospace" />
+
+            <CheckBox
+                android:id="@+id/weatherNwsRepeatEnabled"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Repeat Weather Radio Every 5 Minutes"
                 android:textColor="#D8F7DE"
                 android:fontFamily="monospace" />
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Serious warnings can pause the scanner, play the alert tone and official NWS alert text, then return to the newest live calls."
+                android:text="Serious warnings can play the alert tone, read official NWS text, switch to about 60 seconds of Weather Radio, then return to live calls. Weather Radio repeats every 5 minutes only when enabled."
                 android:textColor="#6F8E76"
                 android:textSize="10sp"
                 android:fontFamily="monospace"
