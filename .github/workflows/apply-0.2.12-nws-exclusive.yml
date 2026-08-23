@@ -1,3 +1,4 @@
+# trigger: apply 0.2.12 update
 name: Apply 0.2.12 NWS Exclusive Update
 
 on:
