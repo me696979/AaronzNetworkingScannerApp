@@ -1,0 +1,88 @@
+name: Apply Android Weather Update
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-weather-update.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply weather feature update
+        shell: python
+        run: |
+          from pathlib import Path
+
+          main = Path('app/src/main/java/net/aaronznetworking/scanner/MainActivity.kt')
+          s = main.read_text()
+
+          # Add repeat timing state.
+          old = '''    private var weatherRefreshPending = false\n    private var locationPermissionRequested = false'''
+          new = '''    private var weatherRefreshPending = false\n    private var locationPermissionRequested = false\n    private var lastWeatherTakeoverAt = 0L\n    private var activeSeriousWeatherAlert: JSONObject? = null'''
+          assert old in s, 'state anchor missing'
+          s = s.replace(old, new, 1)
+
+          # Add independent speech/repeat controls.
+          old = '''        val alertsEnabled = findViewById<CheckBox>(R.id.weatherAlertsEnabled)\n        val soundEnabled = findViewById<CheckBox>(R.id.weatherAlertSoundEnabled)'''
+          new = '''        val alertsEnabled = findViewById<CheckBox>(R.id.weatherAlertsEnabled)\n        val soundEnabled = findViewById<CheckBox>(R.id.weatherAlertSoundEnabled)\n        val speechEnabled = findViewById<CheckBox>(R.id.weatherAlertSpeechEnabled)\n        val repeatEnabled = findViewById<CheckBox>(R.id.weatherNwsRepeatEnabled)'''
+          assert old in s, 'control anchor missing'
+          s = s.replace(old, new, 1)
+
+          old = '''        alertsEnabled.isChecked = prefs.getBoolean("weather_alerts_enabled", false)\n        soundEnabled.isChecked = prefs.getBoolean("weather_alert_sound_enabled", false)'''
+          new = '''        alertsEnabled.isChecked = prefs.getBoolean("weather_alerts_enabled", false)\n        soundEnabled.isChecked = prefs.getBoolean("weather_alert_sound_enabled", false)\n        speechEnabled.isChecked = prefs.getBoolean("weather_alert_speech_enabled", true)\n        repeatEnabled.isChecked = prefs.getBoolean("weather_nws_repeat_enabled", true)'''
+          assert old in s, 'defaults anchor missing'
+          s = s.replace(old, new, 1)
+
+          old = '''        soundEnabled.setOnCheckedChangeListener { _, checked ->\n            prefs.edit().putBoolean("weather_alert_sound_enabled", checked).apply()\n        }'''
+          new = '''        soundEnabled.setOnCheckedChangeListener { _, checked ->\n            prefs.edit().putBoolean("weather_alert_sound_enabled", checked).apply()\n        }\n\n        speechEnabled.setOnCheckedChangeListener { _, checked ->\n            prefs.edit().putBoolean("weather_alert_speech_enabled", checked).apply()\n        }\n\n        repeatEnabled.setOnCheckedChangeListener { _, checked ->\n            prefs.edit().putBoolean("weather_nws_repeat_enabled", checked).apply()\n        }'''
+          assert old in s, 'listener anchor missing'
+          s = s.replace(old, new, 1)
+
+          # Replace alert trigger logic with initial + optional five-minute repeat.
+          old = '''            if (\n                newSerious.isNotEmpty() &&\n                prefs.getBoolean("weather_alert_sound_enabled", false)\n            ) {\n                runWeatherAlertInterruption(newSerious.first())\n            }'''
+          new = '''            val seriousActive = (0 until alerts.length())\n                .map { alerts.getJSONObject(it) }\n                .firstOrNull { weatherAlertShouldInterrupt(it) }\n\n            activeSeriousWeatherAlert = seriousActive\n\n            val now = System.currentTimeMillis()\n            val repeatDue =\n                seriousActive != null &&\n                prefs.getBoolean("weather_nws_repeat_enabled", true) &&\n                lastWeatherTakeoverAt > 0L &&\n                now - lastWeatherTakeoverAt >= WeatherTakeoverConfig.REPEAT_MS\n\n            when {\n                newSerious.isNotEmpty() ->\n                    runWeatherAlertInterruption(\n                        newSerious.first(),\n                        initial = true\n                    )\n\n                repeatDue ->\n                    runWeatherAlertInterruption(\n                        seriousActive!!,\n                        initial = false\n                    )\n            }'''
+          assert old in s, 'trigger anchor missing'
+          s = s.replace(old, new, 1)
+
+          # Replace interruption routine: optional tone, optional speech, then one latest NWS segment.
+          start = s.index('    private suspend fun runWeatherAlertInterruption(alert: JSONObject) {')
+          end = s.index('    private suspend fun playWeatherAlertTone()', start)
+          replacement = '''    private suspend fun runWeatherAlertInterruption(\n        alert: JSONObject,\n        initial: Boolean\n    ) {\n        if (weatherInterrupting) return\n        weatherInterrupting = true\n        lastWeatherTakeoverAt = System.currentTimeMillis()\n        val scannerWasRunning = running\n\n        try {\n            if (scannerWasRunning) {\n                scannerGeneration += 1\n                scannerJob?.cancel()\n                scannerJob = null\n                cursor = null\n                if (controllerFuture.isDone) {\n                    try {\n                        controllerFuture.get().stop()\n                        controllerFuture.get().clearMediaItems()\n                    } catch (_: Exception) {}\n                }\n            }\n\n            findViewById<TextView>(R.id.status).text =\n                "${alert.optString("event", "Weather warning")} — WEATHER ALERT"\n\n            if (initial && prefs.getBoolean("weather_alert_sound_enabled", false)) {\n                playWeatherAlertTone()\n            }\n\n            if (initial && prefs.getBoolean("weather_alert_speech_enabled", true)) {\n                speakOfficialWeatherAlert(alert)\n            }\n\n            if (scannerWasRunning && running) {\n                playLatestNwsSegment()\n            }\n        } finally {\n            weatherInterrupting = false\n\n            if (scannerWasRunning && running) {\n                restartScannerAtLiveEdge(\n                    "Weather alert complete — returning to live calls…"\n                )\n            }\n        }\n    }\n\n    private suspend fun playLatestNwsSegment() {\n        findViewById<TextView>(R.id.status).text =\n            "Weather alert — switching to NWS Weather Radio…"\n\n        val data = withContext(Dispatchers.IO) {\n            getJson(WeatherTakeoverConfig.LATEST_NWS_PATH)\n        } ?: return\n\n        val call = data.optJSONObject("call") ?: return\n        val audioUrl = call.optString("audio_url")\n        if (audioUrl.isBlank()) return\n\n        val controller = withContext(Dispatchers.IO) {\n            controllerFuture.get()\n        }\n\n        findViewById<TextView>(R.id.nowPlaying).text =\n            call.optString("talkgroupLabel", "National Weather Service")\n        findViewById<TextView>(R.id.details).text =\n            "TGID ${call.optString("talkgroup", WeatherTakeoverConfig.NWS_TALKGROUP)} • ${call.optString("frequency", "")}"\n\n        val finished = CompletableDeferred<Unit>()\n        val listener = object : Player.Listener {\n            override fun onPlaybackStateChanged(playbackState: Int) {\n                if (playbackState == Player.STATE_ENDED && !finished.isCompleted) {\n                    finished.complete(Unit)\n                }\n            }\n        }\n\n        controller.addListener(listener)\n        try {\n            controller.setMediaItem(MediaItem.fromUri(base + audioUrl))\n            controller.prepare()\n            controller.play()\n            withTimeoutOrNull(WeatherTakeoverConfig.TAKEOVER_MS) {\n                finished.await()\n            }\n        } finally {\n            controller.removeListener(listener)\n            controller.stop()\n            controller.clearMediaItems()\n        }\n    }\n\n'''
+          s = s[:start] + replacement + s[end:]
+          main.write_text(s)
+
+          # UI controls.
+          layout = Path('app/src/main/res/layout/activity_main.xml')
+          x = layout.read_text()
+          old = '''            <CheckBox\n                android:id="@+id/weatherAlertSoundEnabled"\n                android:layout_width="match_parent"\n                android:layout_height="wrap_content"\n                android:text="Alert Sound + Spoken Warning"\n                android:textColor="#D8F7DE"\n                android:fontFamily="monospace" />'''
+          new = '''            <CheckBox\n                android:id="@+id/weatherAlertSoundEnabled"\n                android:layout_width="match_parent"\n                android:layout_height="wrap_content"\n                android:text="Alert Sound"\n                android:textColor="#D8F7DE"\n                android:fontFamily="monospace" />\n\n            <CheckBox\n                android:id="@+id/weatherAlertSpeechEnabled"\n                android:layout_width="match_parent"\n                android:layout_height="wrap_content"\n                android:text="Read Weather Alerts Aloud"\n                android:textColor="#D8F7DE"\n                android:fontFamily="monospace" />\n\n            <CheckBox\n                android:id="@+id/weatherNwsRepeatEnabled"\n                android:layout_width="match_parent"\n                android:layout_height="wrap_content"\n                android:text="Repeat Weather Radio Every 5 Minutes"\n                android:textColor="#D8F7DE"\n                android:fontFamily="monospace" />'''
+          assert old in x, 'layout anchor missing'
+          x = x.replace(old, new, 1)
+          x = x.replace(
+              'Serious warnings can pause the scanner, play the alert tone and official NWS alert text, then return to the newest live calls.',
+              'Serious warnings can play the alert tone, read official NWS text, switch to about 60 seconds of Weather Radio, then return to live calls. Weather Radio repeats every 5 minutes only when enabled.'
+          )
+          layout.write_text(x)
+
+          # 90-second safety cap accommodates a roughly 60-second completed NWS chunk.
+          cfg = Path('app/src/main/java/net/aaronznetworking/scanner/WeatherTakeoverConfig.kt')
+          c = cfg.read_text().replace('const val TAKEOVER_MS = 180_000L', 'const val TAKEOVER_MS = 90_000L')
+          cfg.write_text(c)
+
+      - name: Commit update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/net/aaronznetworking/scanner/MainActivity.kt app/src/main/java/net/aaronznetworking/scanner/WeatherTakeoverConfig.kt app/src/main/res/layout/activity_main.xml
+          git diff --cached --check
+          git commit -m "Update Android weather alert controls and NWS takeover"
+          git push
