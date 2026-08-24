@@ -5,14 +5,14 @@ plugins {
 
 android {
     namespace = "net.aaronznetworking.scanner"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "huntington.localscannerapp"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 13
-        versionName = "0.2.11"
+        targetSdk = 36
+        versionCode = 14
+        versionName = "0.2.12"
     }
 
     signingConfigs {
