@@ -1,0 +1,358 @@
+name: Apply verified 0.2.13 update
+
+on:
+  push:
+    paths:
+      - '.github/triggers/apply-0213-final'
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Apply 0.2.13 source changes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              if new in text:
+                  return text
+              if old not in text:
+                  raise SystemExit(f"ERROR: marker not found: {label}")
+              return text.replace(old, new, 1)
+
+          # Version
+          p = Path('app/build.gradle.kts')
+          s = p.read_text()
+          s = s.replace('versionCode = 14', 'versionCode = 15')
+          s = s.replace('versionName = "0.2.12"', 'versionName = "0.2.13"')
+          p.write_text(s)
+
+          # Layout
+          p = Path('app/src/main/res/layout/activity_main.xml')
+          x = p.read_text()
+          tg = '''        <Button
+                      android:id="@+id/talkgroupButton"
+                      android:layout_width="match_parent"
+                      android:layout_height="50dp"
+                      android:text="CHOOSE TALKGROUPS"
+                      android:textStyle="bold"
+                      android:textColor="#D8F7DE"
+                      android:backgroundTint="#173D20"
+                      android:layout_marginTop="10dp" />'''
+          feed = tg + '''
+
+                  <Button
+                      android:id="@+id/feedButton"
+                      android:layout_width="match_parent"
+                      android:layout_height="46dp"
+                      android:text="FEED: LOADING…"
+                      android:textStyle="bold"
+                      android:textColor="#D8F7DE"
+                      android:backgroundTint="#173D20"
+                      android:layout_marginTop="8dp"
+                      android:visibility="gone" />'''
+          if '@+id/feedButton' not in x:
+              x = replace_once(x, tg, feed, 'talkgroup button')
+
+          wh = '''            <TextView
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:text="☁ LOCAL WEATHER"
+                          android:textColor="#6CFF88"
+                          android:textStyle="bold"
+                          android:textSize="13sp"
+                          android:fontFamily="monospace" />'''
+          wh2 = wh + '''
+
+                      <Button
+                          android:id="@+id/weatherCollapse"
+                          android:layout_width="wrap_content"
+                          android:layout_height="40dp"
+                          android:text="EXPAND"
+                          android:textSize="10sp"
+                          android:textColor="#D8F7DE"
+                          android:backgroundTint="#173D20"
+                          android:layout_marginTop="8dp" />
+
+                      <CheckBox
+                          android:id="@+id/weatherAutoExpand"
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:text="Auto-expand when a weather alert is active"
+                          android:textColor="#D8F7DE"
+                          android:fontFamily="monospace"
+                          android:paddingTop="6dp" />'''
+          if '@+id/weatherCollapse' not in x:
+              x = replace_once(x, wh, wh2, 'weather header')
+          p.write_text(x)
+
+          # Main activity
+          p = Path('app/src/main/java/net/aaronznetworking/scanner/MainActivity.kt')
+          s = p.read_text()
+
+          weather_model = '''    private data class WeatherPoint(
+                  val lat: Double,
+                  val lon: Double,
+                  val city: String = "",
+                  val state: String = ""
+              )'''
+          feed_model = weather_model + '''
+
+              private data class FeedOption(
+                  val slug: String,
+                  val name: String,
+                  val location: String,
+                  val weatherRadioTalkgroup: String?,
+                  val weatherRadioExclusive: Boolean
+              )'''
+          if 'private data class FeedOption' not in s:
+              s = replace_once(s, weather_model, feed_model, 'WeatherPoint')
+
+          state = '    private var activeSeriousWeatherAlert: JSONObject? = null\n'
+          state2 = state + '''    private val feeds = mutableListOf<FeedOption>()
+              private var selectedFeedSlug = "wv-cabell-001"
+              private var weatherRadioTalkgroup: String? = null
+              private var weatherRadioExclusive = true
+              private var weatherCollapsed = true
+'''
+          if 'private val feeds = mutableListOf<FeedOption>()' not in s:
+              s = replace_once(s, state, state2, 'feed state')
+
+          if 'R.id.feedButton).setOnClickListener' not in s:
+              marker = '        loadSavedBlockedTalkgroups()\n'
+              add = '''        findViewById<Button>(R.id.feedButton).setOnClickListener {
+                  showFeedDialog()
+              }
+
+'''
+              s = replace_once(s, marker, add + marker, 'feed button listener')
+
+          if 'setupWeatherCollapse()' not in s:
+              s = replace_once(s, '        setupWeatherControls()\n', '        setupWeatherControls()\n        setupWeatherCollapse()\n', 'weather collapse setup')
+
+          # Initial feed load.
+          s = replace_once(s, '        scope.launch { loadTalkgroups() }\n', '        scope.launch { loadFeeds() }\n', 'initial feed load')
+
+          # Every queue operation must be feed scoped.
+          s = s.replace(
+              'getJson("/api/call-queue/latest")',
+              'getJson("/api/call-queue?feed=${URLEncoder.encode(selectedFeedSlug, "UTF-8")}&limit=1")'
+          )
+          s = s.replace(
+              'getJson("/api/call-queue?limit=20&after=$after")',
+              'getJson("/api/call-queue?feed=${URLEncoder.encode(selectedFeedSlug, "UTF-8")}&limit=20&after=$after")'
+          )
+          s = s.replace(
+              'getJson("/api/public/talkgroups")',
+              'getJson("/api/public/talkgroups?feed=${URLEncoder.encode(selectedFeedSlug, "UTF-8")}")'
+          )
+
+          # Dynamic Weather Radio endpoint.
+          old = '''        val data = withContext(Dispatchers.IO) {
+              getJson(WeatherTakeoverConfig.LATEST_NWS_PATH)
+          } ?: return'''
+          new = '''        val nwsTalkgroup = weatherRadioTalkgroup ?: return
+              val data = withContext(Dispatchers.IO) {
+                  getJson(
+                      "/api/call-queue/latest-talkgroup?talkgroup=" +
+                          URLEncoder.encode(nwsTalkgroup, "UTF-8") +
+                          "&max_age_seconds=300"
+                  )
+              } ?: return'''
+          if 'val nwsTalkgroup = weatherRadioTalkgroup ?: return' not in s:
+              s = replace_once(s, old, new, 'NWS endpoint')
+          s = s.replace(
+              'call.optString("talkgroup", WeatherTakeoverConfig.NWS_TALKGROUP)',
+              'call.optString("talkgroup", weatherRadioTalkgroup ?: "")'
+          )
+
+          # Feed helpers before loadTalkgroups.
+          marker = '    private suspend fun loadTalkgroups(): Boolean {'
+          if 'private suspend fun loadFeeds(): Boolean' not in s:
+              helpers = r'''    private suspend fun loadFeeds(): Boolean {
+              val data = withContext(Dispatchers.IO) { getJson("/api/feeds") } ?: return false
+              val arr = data.optJSONArray("feeds") ?: return false
+              feeds.clear()
+
+              for (i in 0 until arr.length()) {
+                  val item = arr.getJSONObject(i)
+                  val slug = item.optString("slug").trim()
+                  if (slug.isBlank()) continue
+                  val weather = item.optJSONObject("weather_radio")
+                  feeds.add(
+                      FeedOption(
+                          slug = slug,
+                          name = item.optString("name", slug),
+                          location = item.optString("location", ""),
+                          weatherRadioTalkgroup = weather?.optString("talkgroup_id")
+                              ?.takeIf { it.isNotBlank() && it != "null" },
+                          weatherRadioExclusive = weather?.optBoolean("exclusive", true) ?: true
+                      )
+                  )
+              }
+              if (feeds.isEmpty()) return false
+
+              val saved = prefs.getString("selected_feed_slug", "").orEmpty()
+              val selected = feeds.firstOrNull { it.slug == saved } ?: feeds.first()
+              applySelectedFeed(selected, restart = false)
+              findViewById<Button>(R.id.feedButton).visibility =
+                  if (feeds.size > 1) View.VISIBLE else View.GONE
+              return loadTalkgroups()
+          }
+
+          private fun applySelectedFeed(feed: FeedOption, restart: Boolean) {
+              selectedFeedSlug = feed.slug
+              weatherRadioTalkgroup = feed.weatherRadioTalkgroup
+              weatherRadioExclusive = feed.weatherRadioExclusive
+              prefs.edit().putString("selected_feed_slug", selectedFeedSlug).apply()
+
+              val repeat = findViewById<CheckBox>(R.id.weatherNwsRepeatEnabled)
+              repeat.visibility = if (weatherRadioTalkgroup != null) View.VISIBLE else View.GONE
+              if (weatherRadioTalkgroup == null) repeat.isChecked = false
+              findViewById<Button>(R.id.feedButton).text = "FEED: ${feed.name}"
+
+              if (restart && running) {
+                  scope.launch { restartScannerAtLiveEdge("Feed changed — returning to live calls…") }
+              }
+          }
+
+          private fun showFeedDialog() {
+              if (feeds.size <= 1) return
+              val labels = feeds.map {
+                  if (it.location.isBlank()) it.name else "${it.name} • ${it.location}"
+              }.toTypedArray()
+              val checked = feeds.indexOfFirst { it.slug == selectedFeedSlug }
+
+              AlertDialog.Builder(this)
+                  .setTitle("Select Scanner Feed")
+                  .setSingleChoiceItems(labels, checked) { dialog, which ->
+                      applySelectedFeed(feeds[which], restart = false)
+                      talkgroups.clear()
+                      blockedTalkgroups.clear()
+                      loadSavedBlockedTalkgroups()
+                      scope.launch {
+                          loadTalkgroups()
+                          if (running) restartScannerAtLiveEdge("Feed changed — returning to live calls…")
+                      }
+                      dialog.dismiss()
+                  }
+                  .setNegativeButton("Cancel", null)
+                  .show()
+          }
+
+          private fun setupWeatherCollapse() {
+              val auto = findViewById<CheckBox>(R.id.weatherAutoExpand)
+              auto.isChecked = prefs.getBoolean("weather_auto_expand", true)
+              auto.setOnCheckedChangeListener { _, checked ->
+                  prefs.edit().putBoolean("weather_auto_expand", checked).apply()
+              }
+              weatherCollapsed = prefs.getBoolean("weather_collapsed", true)
+              findViewById<Button>(R.id.weatherCollapse).setOnClickListener {
+                  weatherCollapsed = !weatherCollapsed
+                  prefs.edit().putBoolean("weather_collapsed", weatherCollapsed).apply()
+                  applyWeatherCollapsedState()
+              }
+              applyWeatherCollapsedState()
+          }
+
+          private fun applyWeatherCollapsedState() {
+              val section = findViewById<LinearLayout>(R.id.weatherSection)
+              val button = findViewById<Button>(R.id.weatherCollapse)
+              for (i in 0 until section.childCount) {
+                  val child = section.getChildAt(i)
+                  child.visibility = if (i <= 1 || !weatherCollapsed) View.VISIBLE else View.GONE
+              }
+              button.visibility = View.VISIBLE
+              button.text = if (weatherCollapsed) "EXPAND" else "COLLAPSE"
+          }
+
+          private fun updateWeatherCollapseForAlert(alertActive: Boolean) {
+              if (!prefs.getBoolean("weather_auto_expand", true)) return
+              weatherCollapsed = if (alertActive) false else prefs.getBoolean("weather_collapsed", true)
+              applyWeatherCollapsedState()
+          }
+
+'''
+              s = replace_once(s, marker, helpers + marker, 'loadTalkgroups')
+
+          # Alert expansion, including the no-alert path.
+          no_alert = '''            if (alerts == null || alerts.length() == 0) {
+                  findViewById<TextView>(R.id.weatherAlertsText).text =
+                      "✓ No active weather alerts\\nNational Weather Service"
+                  return
+              }'''
+          no_alert2 = '''            if (alerts == null || alerts.length() == 0) {
+                  activeSeriousWeatherAlert = null
+                  updateWeatherCollapseForAlert(false)
+                  findViewById<TextView>(R.id.weatherAlertsText).text =
+                      "✓ No active weather alerts\\nNational Weather Service"
+                  return
+              }'''
+          if 'activeSeriousWeatherAlert = null\n            updateWeatherCollapseForAlert(false)' not in s:
+              s = replace_once(s, no_alert, no_alert2, 'no alert collapse')
+
+          serious = '            activeSeriousWeatherAlert = seriousActive\n'
+          serious2 = serious + '            updateWeatherCollapseForAlert(true)\n'
+          if 'activeSeriousWeatherAlert = seriousActive\n            updateWeatherCollapseForAlert(true)' not in s:
+              s = replace_once(s, serious, serious2, 'active alert expansion')
+
+          # Only try NWS takeover when this feed actually has Weather Radio.
+          repeat_old = '''            val repeatDue =
+                  seriousActive != null &&
+                  prefs.getBoolean("weather_nws_repeat_enabled", true) &&'''
+          repeat_new = '''            val repeatDue =
+                  seriousActive != null &&
+                  weatherRadioTalkgroup != null &&
+                  prefs.getBoolean("weather_nws_repeat_enabled", true) &&'''
+          if 'seriousActive != null &&\n                weatherRadioTalkgroup != null &&' not in s:
+              s = replace_once(s, repeat_old, repeat_new, 'repeat weather availability')
+
+          # Do not make initial alert takeover depend on a Weather Radio channel;
+          # tone/speech still work, while playLatestNwsSegment safely returns if absent.
+          p.write_text(s)
+
+          # Validation: fail before committing if the intended source did not land.
+          checks = {
+              'app/build.gradle.kts': ['versionCode = 15', 'versionName = "0.2.13"'],
+              'app/src/main/res/layout/activity_main.xml': ['@+id/feedButton', '@+id/weatherCollapse', '@+id/weatherAutoExpand'],
+              'app/src/main/java/net/aaronznetworking/scanner/MainActivity.kt': [
+                  '/api/feeds', 'selectedFeedSlug', 'weatherRadioTalkgroup',
+                  'setupWeatherCollapse()', 'updateWeatherCollapseForAlert',
+                  '/api/public/talkgroups?feed=', '/api/call-queue?feed='
+              ]
+          }
+          for filename, needles in checks.items():
+              text = Path(filename).read_text()
+              for needle in needles:
+                  if needle not in text:
+                      raise SystemExit(f'VALIDATION FAILED: {filename}: {needle}')
+
+          print('0.2.13 source validation passed')
+          PY
+
+      - name: Compile Android app
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug
+
+      - name: Commit verified update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/build.gradle.kts app/src/main/res/layout/activity_main.xml app/src/main/java/net/aaronznetworking/scanner/MainActivity.kt
+          git diff --cached --quiet && { echo 'No source changes'; exit 0; }
+          git commit -m "Apply verified Scannerz Network 0.2.13 multi-feed update"
+          git push
