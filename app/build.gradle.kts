@@ -11,8 +11,8 @@ android {
         applicationId = "huntington.localscannerapp"
         minSdk = 26
         targetSdk = 36
-        versionCode = 17
-        versionName = "0.2.15"
+        versionCode = 18
+        versionName = "0.2.16"
     }
 
     signingConfigs {

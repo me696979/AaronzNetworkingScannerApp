@@ -327,7 +327,10 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
 
-        scope.launch { loadTalkgroups() }
+        scope.launch {
+            loadFeeds()
+            loadTalkgroups()
+        }
 
         if (
             running &&
@@ -403,6 +406,7 @@ class MainActivity : AppCompatActivity() {
 
                 if (isActive) {
                     withContext(Dispatchers.Main) {
+                        launch { loadFeeds() }
                         launch { loadTalkgroups() }
                         launch { updateAnnouncements() }
                         launch { updateWeather() }
@@ -423,6 +427,19 @@ class MainActivity : AppCompatActivity() {
         when (event.optString("type")) {
             "talkgroups_changed" -> withContext(Dispatchers.Main) {
                 loadTalkgroups()
+            }
+
+            "feeds_changed" -> withContext(Dispatchers.Main) {
+                val previousFeed = selectedFeedSlug
+                val loaded = loadFeeds()
+                if (loaded) {
+                    loadTalkgroups()
+                    if (running && previousFeed != selectedFeedSlug) {
+                        restartScannerAtLiveEdge(
+                            "Feed list updated — returning to live calls…"
+                        )
+                    }
+                }
             }
 
             "announcements_changed" -> withContext(Dispatchers.Main) {
@@ -481,24 +498,24 @@ class MainActivity : AppCompatActivity() {
     private suspend fun scannerLoop(generation: Long) {
         while (currentCoroutineContext().isActive && running && generation == scannerGeneration) {
             if (cursor.isNullOrBlank()) {
+                // Establish the cursor from the server's dedicated live-edge
+                // endpoint. Never use a no-cursor queue request here: that endpoint
+                // may contain historical audio and can make a fresh app session
+                // replay an old backlog.
                 val liveEdgeJson = withContext(Dispatchers.IO) {
-                    getJson("/api/call-queue?feed=${URLEncoder.encode(selectedFeedSlug, "UTF-8")}&limit=1")
+                    getJson(
+                        "/api/call-queue/latest?feed=" +
+                            URLEncoder.encode(selectedFeedSlug, "UTF-8")
+                    )
                 }
 
                 val liveEdge = liveEdgeJson
                     ?.optString("latest_id")
                     ?.takeIf { it.isNotBlank() && it != "null" }
 
-                val liveEdgeTime = try {
-                    liveEdgeJson
-                        ?.optJSONArray("calls")
-                        ?.optJSONObject(0)
-                        ?.optString("received_at")
-                        ?.takeIf { it.isNotBlank() }
-                        ?.let { Instant.parse(it) }
-                } catch (_: Exception) {
-                    null
-                }
+                // Calls returned after this cursor must also be fresh relative to
+                // the moment the app established its live edge.
+                val liveEdgeTime = Instant.now()
 
                 if (!running || generation != scannerGeneration) return
 
@@ -586,6 +603,12 @@ class MainActivity : AppCompatActivity() {
 
             val edgeTime = liveEdgeReceivedAt
             if (edgeTime != null && callReceivedAt != null && !callReceivedAt.isAfter(edgeTime)) {
+                continue
+            }
+
+            // Hard freshness guard. A live scanner should never work through a
+            // stored backlog after startup, reconnect, or a feed change.
+            if (callReceivedAt != null && callReceivedAt.isBefore(Instant.now().minusSeconds(45))) {
                 continue
             }
 
@@ -845,6 +868,7 @@ class MainActivity : AppCompatActivity() {
     private suspend fun loadFeeds(): Boolean {
         val data = withContext(Dispatchers.IO) { getJson("/api/feeds") } ?: return false
         val arr = data.optJSONArray("feeds") ?: return false
+        val previousSlug = selectedFeedSlug
         feeds.clear()
         for (i in 0 until arr.length()) {
             val item = arr.getJSONObject(i)
@@ -855,9 +879,13 @@ class MainActivity : AppCompatActivity() {
         }
         if (feeds.isEmpty()) return false
         val saved = prefs.getString("selected_feed_slug", "").orEmpty()
-        applySelectedFeed(feeds.firstOrNull { it.slug == saved } ?: feeds.first())
-        findViewById<Button>(R.id.feedButton).visibility = if (feeds.size > 1) View.VISIBLE else View.GONE
-        return loadTalkgroups()
+        val selected = feeds.firstOrNull { it.slug == previousSlug }
+            ?: feeds.firstOrNull { it.slug == saved }
+            ?: feeds.first()
+        applySelectedFeed(selected)
+        findViewById<Button>(R.id.feedButton).visibility =
+            if (feeds.size > 1) View.VISIBLE else View.GONE
+        return true
     }
 
     private fun applySelectedFeed(feed: FeedOption) {
