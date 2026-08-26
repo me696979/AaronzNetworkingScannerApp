@@ -11,3 +11,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "TriStateScanner"
 include(":app")
+include(":adminapp")
