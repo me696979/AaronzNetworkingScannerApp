@@ -1,0 +1,53 @@
+name: Build Scannerz Network Admin APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'adminapp/**'
+      - 'settings.gradle.kts'
+      - '.github/workflows/build-admin-apk.yml'
+
+jobs:
+  build-admin:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Restore release signing keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/scannerz-network-admin-release.jks"
+
+      - name: Build signed Scannerz Network Admin APK
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/scannerz-network-admin-release.jks
+        run: gradle :adminapp:assembleRelease --stacktrace
+
+      - name: Rename Admin APK
+        run: cp adminapp/build/outputs/apk/release/adminapp-release.apk Scannerz-Network-Admin.apk
+
+      - name: Upload Admin APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Scannerz-Network-Admin-Release-APK
+          path: Scannerz-Network-Admin.apk
