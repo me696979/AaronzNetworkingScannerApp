@@ -52,6 +52,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
+import java.time.Instant
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
@@ -75,6 +76,7 @@ class MainActivity : AppCompatActivity() {
 
     private var running = false
     private var cursor: String? = null
+    private var liveEdgeReceivedAt: Instant? = null
     private var scannerJob: Job? = null
     private var liveEventsJob: Job? = null
     private var weatherJob: Job? = null
@@ -453,6 +455,7 @@ class MainActivity : AppCompatActivity() {
         scannerJob?.cancel()
         scannerJob = null
         cursor = null
+        liveEdgeReceivedAt = null
 
         if (controllerFuture.isDone) {
             try {
@@ -474,10 +477,23 @@ class MainActivity : AppCompatActivity() {
     private suspend fun scannerLoop(generation: Long) {
         while (currentCoroutineContext().isActive && running && generation == scannerGeneration) {
             if (cursor.isNullOrBlank()) {
-                val liveEdge = withContext(Dispatchers.IO) {
+                val liveEdgeJson = withContext(Dispatchers.IO) {
                     getJson("/api/call-queue?feed=${URLEncoder.encode(selectedFeedSlug, "UTF-8")}&limit=1")
-                        ?.optString("latest_id")
-                        ?.takeIf { it.isNotBlank() && it != "null" }
+                }
+
+                val liveEdge = liveEdgeJson
+                    ?.optString("latest_id")
+                    ?.takeIf { it.isNotBlank() && it != "null" }
+
+                val liveEdgeTime = try {
+                    liveEdgeJson
+                        ?.optJSONArray("calls")
+                        ?.optJSONObject(0)
+                        ?.optString("received_at")
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { Instant.parse(it) }
+                } catch (_: Exception) {
+                    null
                 }
 
                 if (!running || generation != scannerGeneration) return
@@ -494,6 +510,7 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 cursor = liveEdge
+                liveEdgeReceivedAt = liveEdgeTime
                 findViewById<TextView>(R.id.status).text = "Waiting for next call…"
             } else {
                 pollCalls(generation)
@@ -550,6 +567,22 @@ class MainActivity : AppCompatActivity() {
 
             if (callId.isNotBlank()) {
                 cursor = callId
+            }
+
+            // Defensive backlog guard: even if the queue endpoint returns stale
+            // records after a restart/feed change, never play anything that was already
+            // present when this scanner session established its live edge.
+            val callReceivedAt = try {
+                call.optString("received_at")
+                    .takeIf { it.isNotBlank() }
+                    ?.let { Instant.parse(it) }
+            } catch (_: Exception) {
+                null
+            }
+
+            val edgeTime = liveEdgeReceivedAt
+            if (edgeTime != null && callReceivedAt != null && !callReceivedAt.isAfter(edgeTime)) {
+                continue
             }
 
             val tg = call.optString("talkgroup").toIntOrNull()
