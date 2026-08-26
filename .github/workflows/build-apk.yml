@@ -44,35 +44,30 @@ jobs:
             cp "$dir/ic_launcher.png" "$dir/ic_launcher_round.png"
           done
 
-      - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
-
-      - name: Rename debug APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk Scannerz-Network-App.apk
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Scannerz-Network-debug
-          path: Scannerz-Network-App.apk
-
-      - name: Restore Google Play signing keystore
-        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+      - name: Restore release signing keystore
         shell: bash
         run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64"
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/scannerz-network-release.jks"
 
-      - name: Build signed Google Play AAB
-        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+      - name: Build signed release APK and Google Play AAB
         env:
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/scannerz-network-release.jks
-        run: gradle bundleRelease --stacktrace
+        run: gradle assembleRelease bundleRelease --stacktrace
 
-      - name: Rename Google Play AAB
-        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
-        run: cp app/build/outputs/bundle/release/app-release.aab Scannerz-Network-Google-Play.aab
+      - name: Rename signed release files
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk Scannerz-Network-App.apk
+          cp app/build/outputs/bundle/release/app-release.aab Scannerz-Network-Google-Play.aab
+
+      - name: Upload signed release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Scannerz-Network-Release-APK
+          path: Scannerz-Network-App.apk
 
       - name: Upload Google Play AAB
-        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: Scannerz-Network-Google-Play
