@@ -101,6 +101,7 @@ class MainActivity : AppCompatActivity() {
 
     private data class TalkgroupOption(
         val id: Int,
+        val selectionKey: String,
         val name: String,
         val talkgroupIds: String,
         val allIds: Set<Int>
@@ -145,7 +146,7 @@ class MainActivity : AppCompatActivity() {
     )
 
     private val talkgroups = mutableListOf<TalkgroupOption>()
-    private val blockedTalkgroups = mutableSetOf<Int>()
+    private val blockedTalkgroups = mutableSetOf<String>()
     private val pendingTranscripts = linkedMapOf<String, String>()
     private val seenTranscriptIds = mutableSetOf<String>()
     private val recentTranscripts = mutableListOf<TranscriptEntry>()
@@ -588,8 +589,7 @@ class MainActivity : AppCompatActivity() {
                 continue
             }
 
-            val tg = call.optString("talkgroup").toIntOrNull()
-            if (tg != null && isTalkgroupBlocked(tg)) continue
+            if (isTalkgroupBlocked(call)) continue
 
             playCallAndWait(call, generation)
         }
@@ -600,9 +600,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun isTalkgroupBlocked(tgid: Int): Boolean {
-        val managed = talkgroups.firstOrNull { tgid in it.allIds }
-        return if (managed != null) managed.id in blockedTalkgroups else tgid in blockedTalkgroups
+    private fun callSelectionKey(call: JSONObject): String {
+        val databaseId = call.optInt("talkgroup_database_id", 0)
+        if (databaseId > 0) return "db:$databaseId"
+
+        return "sdr:${call.optString("talkgroup").trim()}"
+    }
+
+    private fun isTalkgroupBlocked(call: JSONObject): Boolean {
+        val key = callSelectionKey(call)
+        if (key in blockedTalkgroups) return true
+
+        // Backward compatibility for preferences saved by 0.2.13 and earlier.
+        val legacyTgid = call.optString("talkgroup").trim()
+        return legacyTgid.isNotBlank() && legacyTgid in blockedTalkgroups
     }
 
     private suspend fun playCallAndWait(call: JSONObject, generation: Long) {
@@ -920,9 +931,15 @@ class MainActivity : AppCompatActivity() {
                 .toSet()
                 .ifEmpty { setOf(id) }
 
+            val databaseId = tg.optInt("database_id", 0)
+            val selectionKey = tg.optString("selection_key").trim().ifBlank {
+                if (databaseId > 0) "db:$databaseId" else "sdr:$id"
+            }
+
             incoming.add(
                 TalkgroupOption(
                     id = id,
+                    selectionKey = selectionKey,
                     name = tg.optString("name", "Talkgroup $id"),
                     talkgroupIds = idsText,
                     allIds = allIds
@@ -932,6 +949,22 @@ class MainActivity : AppCompatActivity() {
 
         talkgroups.clear()
         talkgroups.addAll(incoming)
+
+        val legacyBlocked = blockedTalkgroups
+            .filter { it.all(Char::isDigit) }
+            .mapNotNull { it.toIntOrNull() }
+            .toSet()
+
+        if (legacyBlocked.isNotEmpty()) {
+            val migrated = incoming
+                .filter { tg -> tg.allIds.any { it in legacyBlocked } }
+                .map { it.selectionKey }
+
+            blockedTalkgroups.removeAll { it.all(Char::isDigit) }
+            blockedTalkgroups.addAll(migrated)
+            saveBlockedTalkgroups()
+        }
+
         updateTalkgroupButton()
         return incoming.isNotEmpty()
     }
@@ -940,13 +973,15 @@ class MainActivity : AppCompatActivity() {
         blockedTalkgroups.clear()
         blockedTalkgroups.addAll(
             prefs.getStringSet("blocked_talkgroups", emptySet())
-                .orEmpty().mapNotNull { it.toIntOrNull() }
+                .orEmpty()
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
         )
     }
 
     private fun saveBlockedTalkgroups() {
         prefs.edit()
-            .putStringSet("blocked_talkgroups", blockedTalkgroups.map { it.toString() }.toSet())
+            .putStringSet("blocked_talkgroups", blockedTalkgroups.toSet())
             .apply()
     }
 
@@ -957,7 +992,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val existingIds = talkgroups.map { it.id }.toSet()
+        val existingIds = talkgroups.map { it.selectionKey }.toSet()
         val blockedExisting = blockedTalkgroups.count { it in existingIds }
         val enabled = (talkgroups.size - blockedExisting).coerceAtLeast(0)
         button.text = "TALKGROUPS: $enabled/${talkgroups.size} ENABLED"
@@ -979,7 +1014,7 @@ class MainActivity : AppCompatActivity() {
         }.toTypedArray()
 
         val checked = BooleanArray(talkgroups.size) { index ->
-            talkgroups[index].id !in blockedTalkgroups
+            talkgroups[index].selectionKey !in blockedTalkgroups
         }
 
         AlertDialog.Builder(this)
@@ -990,7 +1025,7 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("Save") { _, _ ->
                 blockedTalkgroups.clear()
                 for (i in talkgroups.indices) {
-                    if (!checked[i]) blockedTalkgroups.add(talkgroups[i].id)
+                    if (!checked[i]) blockedTalkgroups.add(talkgroups[i].selectionKey)
                 }
                 saveBlockedTalkgroups()
                 updateTalkgroupButton()
