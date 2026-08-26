@@ -292,6 +292,7 @@ class MainActivity : AppCompatActivity() {
         scope.launch {
             while (isActive) {
                 updateStatsAndAlerts()
+                loadTalkgroups()
                 delay(15000)
             }
         }
@@ -324,6 +325,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+
+        scope.launch { loadTalkgroups() }
 
         if (
             running &&
