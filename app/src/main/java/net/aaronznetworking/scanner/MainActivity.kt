@@ -88,6 +88,10 @@ class MainActivity : AppCompatActivity() {
     private var locationPermissionRequested = false
     private var lastWeatherTakeoverAt = 0L
     private var activeSeriousWeatherAlert: JSONObject? = null
+    private val feeds = mutableListOf<FeedOption>()
+    private var selectedFeedSlug = "wv-cabell-001"
+    private var weatherRadioTalkgroup: String? = null
+    private var weatherCollapsed = true
     private var audioFocusLostAt = 0L
 
     private var textToSpeech: TextToSpeech? = null
@@ -129,6 +133,13 @@ class MainActivity : AppCompatActivity() {
         val lon: Double,
         val city: String = "",
         val state: String = ""
+    )
+
+    private data class FeedOption(
+        val slug: String,
+        val name: String,
+        val location: String,
+        val weatherRadioTalkgroup: String?
     )
 
     private val talkgroups = mutableListOf<TalkgroupOption>()
@@ -253,9 +264,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        findViewById<Button>(R.id.feedButton).setOnClickListener { showFeedDialog() }
+
         loadSavedBlockedTalkgroups()
         setupCollapsibleSections()
         setupWeatherControls()
+        setupWeatherCollapse()
         renderRecentTranscripts()
         renderRecentCalls()
         renderAnnouncements()
@@ -267,7 +281,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Load each initial API independently so one failed request cannot block the other.
-        scope.launch { loadTalkgroups() }
+        scope.launch { loadFeeds() }
         scope.launch { updateAnnouncements() }
         scope.launch { updateWeather() }
 
@@ -461,7 +475,7 @@ class MainActivity : AppCompatActivity() {
         while (currentCoroutineContext().isActive && running && generation == scannerGeneration) {
             if (cursor.isNullOrBlank()) {
                 val liveEdge = withContext(Dispatchers.IO) {
-                    getJson("/api/call-queue/latest")
+                    getJson("/api/call-queue?feed=${URLEncoder.encode(selectedFeedSlug, "UTF-8")}&limit=1")
                         ?.optString("latest_id")
                         ?.takeIf { it.isNotBlank() && it != "null" }
                 }
@@ -521,7 +535,7 @@ class MainActivity : AppCompatActivity() {
         val after = cursor ?: return
 
         val json = withContext(Dispatchers.IO) {
-            getJson("/api/call-queue?limit=20&after=$after")
+            getJson("/api/call-queue?feed=${URLEncoder.encode(selectedFeedSlug, "UTF-8")}&limit=20&after=$after")
         } ?: return
 
         if (!running || generation != scannerGeneration || weatherInterrupting) return
@@ -781,9 +795,78 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    private suspend fun loadFeeds(): Boolean {
+        val data = withContext(Dispatchers.IO) { getJson("/api/feeds") } ?: return false
+        val arr = data.optJSONArray("feeds") ?: return false
+        feeds.clear()
+        for (i in 0 until arr.length()) {
+            val item = arr.getJSONObject(i)
+            val slug = item.optString("slug").trim()
+            if (slug.isBlank()) continue
+            val weather = item.optJSONObject("weather_radio")
+            feeds.add(FeedOption(slug, item.optString("name", slug), item.optString("location", ""), weather?.optString("talkgroup_id")?.takeIf { it.isNotBlank() && it != "null" }))
+        }
+        if (feeds.isEmpty()) return false
+        val saved = prefs.getString("selected_feed_slug", "").orEmpty()
+        applySelectedFeed(feeds.firstOrNull { it.slug == saved } ?: feeds.first())
+        findViewById<Button>(R.id.feedButton).visibility = if (feeds.size > 1) View.VISIBLE else View.GONE
+        return loadTalkgroups()
+    }
+
+    private fun applySelectedFeed(feed: FeedOption) {
+        selectedFeedSlug = feed.slug
+        weatherRadioTalkgroup = feed.weatherRadioTalkgroup
+        prefs.edit().putString("selected_feed_slug", feed.slug).apply()
+        findViewById<Button>(R.id.feedButton).text = "FEED: ${feed.name}"
+        val nws = findViewById<CheckBox>(R.id.weatherNwsRepeatEnabled)
+        nws.visibility = if (weatherRadioTalkgroup == null) View.GONE else View.VISIBLE
+        if (weatherRadioTalkgroup == null) nws.isChecked = false
+    }
+
+    private fun showFeedDialog() {
+        if (feeds.size <= 1) return
+        val labels = feeds.map { if (it.location.isBlank()) it.name else "${it.name} • ${it.location}" }.toTypedArray()
+        val checked = feeds.indexOfFirst { it.slug == selectedFeedSlug }
+        AlertDialog.Builder(this).setTitle("Select Scanner Feed").setSingleChoiceItems(labels, checked) { dialog, which ->
+            applySelectedFeed(feeds[which]); talkgroups.clear(); blockedTalkgroups.clear(); loadSavedBlockedTalkgroups()
+            scope.launch { loadTalkgroups(); if (running) restartScannerAtLiveEdge("Feed changed — returning to live calls…") }
+            dialog.dismiss()
+        }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun setupWeatherCollapse() {
+        val auto = findViewById<CheckBox>(R.id.weatherAutoExpand)
+        auto.isChecked = prefs.getBoolean("weather_auto_expand", true)
+        auto.setOnCheckedChangeListener { _, v -> prefs.edit().putBoolean("weather_auto_expand", v).apply() }
+        weatherCollapsed = prefs.getBoolean("weather_collapsed", true)
+        findViewById<Button>(R.id.weatherCollapse).setOnClickListener {
+            weatherCollapsed = !weatherCollapsed
+            prefs.edit().putBoolean("weather_collapsed", weatherCollapsed).apply()
+            applyWeatherCollapsedState()
+        }
+        applyWeatherCollapsedState()
+    }
+
+    private fun applyWeatherCollapsedState() {
+        val section = findViewById<LinearLayout>(R.id.weatherSection)
+        val collapse = findViewById<Button>(R.id.weatherCollapse)
+        for (i in 0 until section.childCount) {
+            val child = section.getChildAt(i)
+            child.visibility = if (i <= 1 || !weatherCollapsed) View.VISIBLE else View.GONE
+        }
+        collapse.visibility = View.VISIBLE
+        collapse.text = if (weatherCollapsed) "EXPAND" else "COLLAPSE"
+    }
+
+    private fun updateWeatherCollapseForAlert(active: Boolean) {
+        if (!prefs.getBoolean("weather_auto_expand", true)) return
+        weatherCollapsed = if (active) false else prefs.getBoolean("weather_collapsed", true)
+        applyWeatherCollapsedState()
+    }
+
     private suspend fun loadTalkgroups(): Boolean {
         val data = withContext(Dispatchers.IO) {
-            getJson("/api/public/talkgroups")
+            getJson("/api/public/talkgroups?feed=${URLEncoder.encode(selectedFeedSlug, "UTF-8")}")
         } ?: return false
 
         val arr = data.optJSONArray("talkgroups") ?: return false
@@ -1187,10 +1270,12 @@ class MainActivity : AppCompatActivity() {
                 .firstOrNull { weatherAlertShouldInterrupt(it) }
 
             activeSeriousWeatherAlert = seriousActive
+            updateWeatherCollapseForAlert(seriousActive != null)
 
             val now = System.currentTimeMillis()
             val repeatDue =
                 seriousActive != null &&
+                weatherRadioTalkgroup != null &&
                 prefs.getBoolean("weather_nws_repeat_enabled", true) &&
                 lastWeatherTakeoverAt > 0L &&
                 now - lastWeatherTakeoverAt >= WeatherTakeoverConfig.REPEAT_MS
@@ -1288,7 +1373,7 @@ class MainActivity : AppCompatActivity() {
             "Weather alert — switching to NWS Weather Radio…"
 
         val data = withContext(Dispatchers.IO) {
-            getJson(WeatherTakeoverConfig.LATEST_NWS_PATH)
+            weatherRadioTalkgroup?.let { tg -> getJson("/api/call-queue/latest-talkgroup?talkgroup=${URLEncoder.encode(tg, "UTF-8")}&max_age_seconds=300") }
         } ?: return
 
         val call = data.optJSONObject("call") ?: return
@@ -1302,7 +1387,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.nowPlaying).text =
             call.optString("talkgroupLabel", "National Weather Service")
         findViewById<TextView>(R.id.details).text =
-            "TGID ${call.optString("talkgroup", WeatherTakeoverConfig.NWS_TALKGROUP)} • ${call.optString("frequency", "")}"
+            "TGID ${call.optString("talkgroup", weatherRadioTalkgroup ?: "")} • ${call.optString("frequency", "")}"
 
         val finished = CompletableDeferred<Unit>()
         val listener = object : Player.Listener {

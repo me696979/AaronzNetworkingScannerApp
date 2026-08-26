@@ -56,6 +56,17 @@
             android:backgroundTint="#173D20"
             android:layout_marginTop="10dp" />
 
+        <Button
+            android:id="@+id/feedButton"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:text="FEED: LOADING…"
+            android:textStyle="bold"
+            android:textColor="#D8F7DE"
+            android:backgroundTint="#173D20"
+            android:layout_marginTop="10dp"
+            android:visibility="gone" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -120,6 +131,24 @@
                 android:textColor="#6CFF88"
                 android:textStyle="bold"
                 android:textSize="13sp"
+                android:fontFamily="monospace" />
+
+            <Button
+                android:id="@+id/weatherCollapse"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:text="EXPAND"
+                android:textSize="10sp"
+                android:textColor="#D8F7DE"
+                android:backgroundTint="#173D20"
+                android:layout_marginTop="8dp" />
+
+            <CheckBox
+                android:id="@+id/weatherAutoExpand"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Auto-expand when a weather alert is active"
+                android:textColor="#D8F7DE"
                 android:fontFamily="monospace" />
 
             <TextView
