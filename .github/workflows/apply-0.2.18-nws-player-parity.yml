@@ -1,0 +1,312 @@
+name: Apply Android 0.2.18 NWS Player Parity
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/apply-0.2.18-nws-player-parity.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Apply Android NWS parity and TG refresh behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          main = Path('app/src/main/java/net/aaronznetworking/scanner/MainActivity.kt')
+          gradle = Path('app/build.gradle.kts')
+
+          s = main.read_text()
+
+          # Add temporary manual-NWS state. Normal TG choices remain the saved state.
+          marker = '    private val blockedTalkgroups = mutableSetOf<String>()\n'
+          addition = marker + '    private var manualNwsActive = false\n    private var preNwsBlockedTalkgroups: Set<String>? = null\n'
+          if 'private var manualNwsActive = false' not in s:
+              if marker not in s:
+                  raise SystemExit('ERROR: blockedTalkgroups marker missing')
+              s = s.replace(marker, addition, 1)
+
+          # Replace the talkgroup chooser with immediate auto-save behavior and
+          # temporary exclusive NWS mode using the feed-provided weather TGID.
+          start_marker = '    private fun showTalkgroupDialog() {'
+          end_marker = '    private fun pushListenerPreferences()'
+          start = s.find(start_marker)
+          end = s.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit('ERROR: could not locate showTalkgroupDialog block')
+
+          replacement = r'''    private fun showTalkgroupDialog() {
+              if (talkgroups.isEmpty()) {
+                  AlertDialog.Builder(this)
+                      .setTitle("Talkgroups")
+                      .setMessage("No talkgroups are currently available.")
+                      .setPositiveButton("OK", null)
+                      .show()
+                  return
+              }
+
+              val labels = talkgroups.map { tg ->
+                  val prefix = if (tg.talkgroupIds.contains(',')) "TGIDs" else "TGID"
+                  "$prefix ${tg.talkgroupIds} • ${tg.name}"
+              }.toTypedArray()
+
+              val nwsRawId = weatherRadioTalkgroup
+                  ?.trim()
+                  ?.toIntOrNull()
+
+              val nwsIndex = talkgroups.indexOfFirst { option ->
+                  nwsRawId != null && nwsRawId in option.allIds
+              }
+
+              val checked = BooleanArray(talkgroups.size) { index ->
+                  if (manualNwsActive && nwsIndex >= 0) {
+                      index == nwsIndex
+                  } else {
+                      talkgroups[index].selectionKey !in blockedTalkgroups
+                  }
+              }
+
+              lateinit var dialog: AlertDialog
+
+              fun repaint() {
+                  for (i in checked.indices) {
+                      dialog.listView.setItemChecked(i, checked[i])
+                  }
+              }
+
+              fun syncAndRestart(message: String, persistNormalChoices: Boolean) {
+                  if (persistNormalChoices) {
+                      saveBlockedTalkgroups()
+                  }
+                  updateTalkgroupButton()
+                  scope.launch(Dispatchers.IO) { pushListenerPreferences() }
+                  if (running) {
+                      scope.launch { restartScannerAtLiveEdge(message) }
+                  }
+              }
+
+              dialog = AlertDialog.Builder(this)
+                  .setTitle("Choose Talkgroups")
+                  .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+                      if (nwsIndex >= 0 && which == nwsIndex) {
+                          if (isChecked) {
+                              if (!manualNwsActive) {
+                                  preNwsBlockedTalkgroups = blockedTalkgroups.toSet()
+                              }
+
+                              manualNwsActive = true
+                              blockedTalkgroups.clear()
+
+                              for (i in talkgroups.indices) {
+                                  checked[i] = i == nwsIndex
+                                  if (i != nwsIndex) {
+                                      blockedTalkgroups.add(talkgroups[i].selectionKey)
+                                  }
+                              }
+
+                              repaint()
+                              syncAndRestart(
+                                  "Weather Radio selected — listening to NWS only…",
+                                  persistNormalChoices = false
+                              )
+                          } else {
+                              manualNwsActive = false
+                              blockedTalkgroups.clear()
+
+                              val restore = preNwsBlockedTalkgroups
+                              if (restore != null) {
+                                  blockedTalkgroups.addAll(restore)
+                              } else {
+                                  loadSavedBlockedTalkgroups()
+                              }
+
+                              preNwsBlockedTalkgroups = null
+
+                              // NWS is opt-in only in normal scanner mode.
+                              blockedTalkgroups.add(talkgroups[nwsIndex].selectionKey)
+
+                              for (i in talkgroups.indices) {
+                                  checked[i] = talkgroups[i].selectionKey !in blockedTalkgroups
+                              }
+
+                              repaint()
+                              syncAndRestart(
+                                  "Returning to normal scanner talkgroups…",
+                                  persistNormalChoices = true
+                              )
+                          }
+                      } else {
+                          // Selecting a normal TG while NWS is exclusive exits NWS,
+                          // restores the user's normal choices, then applies this click.
+                          if (manualNwsActive) {
+                              manualNwsActive = false
+                              blockedTalkgroups.clear()
+                              preNwsBlockedTalkgroups?.let { blockedTalkgroups.addAll(it) }
+                                  ?: loadSavedBlockedTalkgroups()
+                              preNwsBlockedTalkgroups = null
+
+                              if (nwsIndex >= 0) {
+                                  blockedTalkgroups.add(talkgroups[nwsIndex].selectionKey)
+                              }
+                          }
+
+                          val key = talkgroups[which].selectionKey
+                          if (isChecked) {
+                              blockedTalkgroups.remove(key)
+                          } else {
+                              blockedTalkgroups.add(key)
+                          }
+
+                          for (i in talkgroups.indices) {
+                              checked[i] = talkgroups[i].selectionKey !in blockedTalkgroups
+                          }
+
+                          repaint()
+                          syncAndRestart(
+                              "Talkgroup choices updated — returning to live calls…",
+                              persistNormalChoices = true
+                          )
+                      }
+                  }
+                  .setNeutralButton("Enable All Normal") { _, _ ->
+                      manualNwsActive = false
+                      preNwsBlockedTalkgroups = null
+                      blockedTalkgroups.clear()
+
+                      if (nwsIndex >= 0) {
+                          blockedTalkgroups.add(talkgroups[nwsIndex].selectionKey)
+                      }
+
+                      saveBlockedTalkgroups()
+                      updateTalkgroupButton()
+                      scope.launch(Dispatchers.IO) { pushListenerPreferences() }
+                      if (running) {
+                          scope.launch {
+                              restartScannerAtLiveEdge(
+                                  "All normal talkgroups enabled — returning to live calls…"
+                              )
+                          }
+                      }
+                  }
+                  .setNegativeButton("Done", null)
+                  .create()
+
+              dialog.show()
+          }
+
+'''
+          s = s[:start] + replacement + s[end:]
+
+          # Keep the app's live TG list synchronized with the same server list used
+          # by the web player. While manual NWS mode is active, any newly-added TG
+          # is automatically blocked so NWS remains exclusive.
+          old = '''        talkgroups.clear()
+        talkgroups.addAll(incoming)
+
+        val legacyBlocked = blockedTalkgroups
+'''
+          new = '''        talkgroups.clear()
+        talkgroups.addAll(incoming)
+
+        val currentNwsRawId = weatherRadioTalkgroup
+            ?.trim()
+            ?.toIntOrNull()
+        val currentNwsOption = incoming.firstOrNull { option ->
+            currentNwsRawId != null && currentNwsRawId in option.allIds
+        }
+
+        if (manualNwsActive) {
+            if (currentNwsOption != null) {
+                blockedTalkgroups.clear()
+                incoming
+                    .filter { it.selectionKey != currentNwsOption.selectionKey }
+                    .forEach { blockedTalkgroups.add(it.selectionKey) }
+            } else {
+                manualNwsActive = false
+                preNwsBlockedTalkgroups = null
+                loadSavedBlockedTalkgroups()
+            }
+        } else if (currentNwsOption != null) {
+            // Weather Radio is opt-in and remains OFF during normal scanning.
+            blockedTalkgroups.add(currentNwsOption.selectionKey)
+        }
+
+        val legacyBlocked = blockedTalkgroups
+'''
+          if old not in s:
+              raise SystemExit('ERROR: live talkgroup refresh insertion point missing')
+          s = s.replace(old, new, 1)
+
+          # Changing feeds always leaves temporary manual NWS mode and reloads the
+          # user's normal saved selections for the new feed context.
+          old = '            applySelectedFeed(feeds[which]); talkgroups.clear(); blockedTalkgroups.clear(); loadSavedBlockedTalkgroups()\n'
+          new = '            manualNwsActive = false; preNwsBlockedTalkgroups = null; applySelectedFeed(feeds[which]); talkgroups.clear(); blockedTalkgroups.clear(); loadSavedBlockedTalkgroups()\n'
+          if old in s:
+              s = s.replace(old, new, 1)
+
+          main.write_text(s)
+
+          g = gradle.read_text()
+          g = re.sub(r'versionCode\s*=\s*\d+', 'versionCode = 20', g, count=1)
+          g = re.sub(r'versionName\s*=\s*"[^"]+"', 'versionName = "0.2.18"', g, count=1)
+          gradle.write_text(g)
+
+          check = main.read_text()
+          required = [
+              'private var manualNwsActive = false',
+              'weatherRadioTalkgroup',
+              'selectionKey !in blockedTalkgroups',
+              'Weather Radio selected — listening to NWS only',
+              'persistNormalChoices = false',
+              'currentNwsOption',
+              '/api/public/talkgroups?feed=',
+          ]
+          for marker in required:
+              if marker not in check:
+                  raise SystemExit(f'ERROR: required marker missing after patch: {marker}')
+
+          gg = gradle.read_text()
+          if 'versionCode = 20' not in gg or 'versionName = "0.2.18"' not in gg:
+              raise SystemExit('ERROR: version bump failed')
+
+          print('Android 0.2.18 NWS parity + automatic TG refresh patch validated')
+          PY
+
+      - name: Compile Android app
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Commit updated Android source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/net/aaronznetworking/scanner/MainActivity.kt app/build.gradle.kts
+          if ! git diff --cached --quiet; then
+            git commit -m "Update Android to 0.2.18 with NWS player parity"
+            git push
+          else
+            echo "No source changes to commit"
+          fi
