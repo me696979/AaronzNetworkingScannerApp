@@ -1,3 +1,4 @@
+# retrigger 0.2.18 NWS parity build
 name: Apply Android 0.2.18 NWS Player Parity
 
 on:
@@ -40,7 +41,6 @@ jobs:
 
           s = main.read_text()
 
-          # Add temporary manual-NWS state. Normal TG choices remain the saved state.
           marker = '    private val blockedTalkgroups = mutableSetOf<String>()\n'
           addition = marker + '    private var manualNwsActive = false\n    private var preNwsBlockedTalkgroups: Set<String>? = null\n'
           if 'private var manualNwsActive = false' not in s:
@@ -48,8 +48,6 @@ jobs:
                   raise SystemExit('ERROR: blockedTalkgroups marker missing')
               s = s.replace(marker, addition, 1)
 
-          # Replace the talkgroup chooser with immediate auto-save behavior and
-          # temporary exclusive NWS mode using the feed-provided weather TGID.
           start_marker = '    private fun showTalkgroupDialog() {'
           end_marker = '    private fun pushListenerPreferences()'
           start = s.find(start_marker)
@@ -143,8 +141,6 @@ jobs:
                               }
 
                               preNwsBlockedTalkgroups = null
-
-                              // NWS is opt-in only in normal scanner mode.
                               blockedTalkgroups.add(talkgroups[nwsIndex].selectionKey)
 
                               for (i in talkgroups.indices) {
@@ -158,8 +154,6 @@ jobs:
                               )
                           }
                       } else {
-                          // Selecting a normal TG while NWS is exclusive exits NWS,
-                          // restores the user's normal choices, then applies this click.
                           if (manualNwsActive) {
                               manualNwsActive = false
                               blockedTalkgroups.clear()
@@ -219,9 +213,6 @@ jobs:
 '''
           s = s[:start] + replacement + s[end:]
 
-          # Keep the app's live TG list synchronized with the same server list used
-          # by the web player. While manual NWS mode is active, any newly-added TG
-          # is automatically blocked so NWS remains exclusive.
           old = '''        talkgroups.clear()
         talkgroups.addAll(incoming)
 
@@ -249,7 +240,6 @@ jobs:
                 loadSavedBlockedTalkgroups()
             }
         } else if (currentNwsOption != null) {
-            // Weather Radio is opt-in and remains OFF during normal scanning.
             blockedTalkgroups.add(currentNwsOption.selectionKey)
         }
 
@@ -259,8 +249,6 @@ jobs:
               raise SystemExit('ERROR: live talkgroup refresh insertion point missing')
           s = s.replace(old, new, 1)
 
-          # Changing feeds always leaves temporary manual NWS mode and reloads the
-          # user's normal saved selections for the new feed context.
           old = '            applySelectedFeed(feeds[which]); talkgroups.clear(); blockedTalkgroups.clear(); loadSavedBlockedTalkgroups()\n'
           new = '            manualNwsActive = false; preNwsBlockedTalkgroups = null; applySelectedFeed(feeds[which]); talkgroups.clear(); blockedTalkgroups.clear(); loadSavedBlockedTalkgroups()\n'
           if old in s:
