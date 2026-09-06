@@ -1,0 +1,47 @@
+name: Run Android 0.2.20 Final Patch
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/trigger-0.2.20.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract and run final patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          src = Path('.github/workflows/apply-0.2.20-final.yml').read_text()
+          start = "          python3 - <<'PY'\n"
+          end = "\n          PY\n"
+          if start not in src:
+              raise SystemExit('patch block start not found')
+          body = src.split(start, 1)[1].split(end, 1)[0]
+          lines = []
+          for line in body.splitlines():
+              lines.append(line[10:] if line.startswith('          ') else line)
+          Path('/tmp/apply_0_2_20.py').write_text('\n'.join(lines) + '\n')
+          PY
+          python3 /tmp/apply_0_2_20.py
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/net/aaronznetworking/scanner/MainActivity.kt app/build.gradle.kts
+          git diff --cached --quiet && exit 0
+          git commit -m "Android 0.2.20: NWS parity and no-call-loss queue"
+          git push
