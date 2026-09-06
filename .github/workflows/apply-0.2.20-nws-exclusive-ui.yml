@@ -1,4 +1,4 @@
-name: Apply Android 0.2.20 NWS Exclusive Selector Fix
+name: Apply Android 0.2.20 NWS Player Parity Fix
 
 on:
   push:
@@ -32,7 +32,7 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Apply NWS exclusive talkgroup selector fix
+      - name: Apply Android NWS parity and no-call-loss fix
         shell: bash
         run: |
           set -euo pipefail
@@ -44,6 +44,9 @@ jobs:
           gradle = Path('app/build.gradle.kts')
           s = main.read_text()
 
+          # --------------------------------------------------
+          # State used only for manual NWS exclusive mode.
+          # --------------------------------------------------
           marker = '    private val blockedTalkgroups = mutableSetOf<String>()\n'
           if 'private var manualNwsActive = false' not in s:
               if marker not in s:
@@ -56,6 +59,50 @@ jobs:
                   1
               )
 
+          # --------------------------------------------------
+          # Do not throw away legitimate calls merely because
+          # the system is busy. The live-edge timestamp guard
+          # above this block is enough to prevent old-session
+          # backlog after startup/reconnect/feed changes.
+          # --------------------------------------------------
+          stale_guard = '''            // Hard freshness guard. A live scanner should never work through a
+            // stored backlog after startup, reconnect, or a feed change.
+            if (callReceivedAt != null && callReceivedAt.isBefore(Instant.now().minusSeconds(45))) {
+                continue
+            }
+
+'''
+          if stale_guard in s:
+              s = s.replace(stale_guard, '', 1)
+
+          # --------------------------------------------------
+          # If NWS was selected before START SCANNER is pressed,
+          # start it the same way as selecting NWS while running.
+          # --------------------------------------------------
+          old_start = '''        scope.launch {
+            restartScannerAtLiveEdge("Starting at live edge…")
+        }
+'''
+          new_start = '''        scope.launch {
+            val nwsId = weatherRadioTalkgroup
+                ?.trim()
+                ?.toIntOrNull()
+
+            if (manualNwsActive && nwsId != null) {
+                enterManualNwsMode(nwsId)
+            } else {
+                restartScannerAtLiveEdge("Starting at live edge…")
+            }
+        }
+'''
+          if old_start not in s:
+              raise SystemExit('startScanner insertion point not found')
+          s = s.replace(old_start, new_start, 1)
+
+          # --------------------------------------------------
+          # Replace talkgroup chooser with immediate auto-save
+          # and true NWS-exclusive behavior.
+          # --------------------------------------------------
           start = s.find('    private fun showTalkgroupDialog() {')
           end = s.find('    private fun pushListenerPreferences()', start)
           if start < 0 or end < 0:
@@ -100,10 +147,13 @@ jobs:
             }
         }
 
-        fun syncPreferences(message: String, saveNormal: Boolean) {
-            if (saveNormal) {
-                saveBlockedTalkgroups()
-            }
+        fun pushTemporaryPreferences() {
+            updateTalkgroupButton()
+            scope.launch(Dispatchers.IO) { pushListenerPreferences() }
+        }
+
+        fun saveNormalPreferences(message: String) {
+            saveBlockedTalkgroups()
             updateTalkgroupButton()
             scope.launch(Dispatchers.IO) { pushListenerPreferences() }
             if (running) {
@@ -131,10 +181,13 @@ jobs:
                         }
 
                         repaint()
-                        syncPreferences(
-                            "NWS Weather Radio selected — normal talkgroups paused…",
-                            saveNormal = false
-                        )
+                        pushTemporaryPreferences()
+
+                        if (running && nwsRawId != null) {
+                            scope.launch {
+                                enterManualNwsMode(nwsRawId)
+                            }
+                        }
                     } else {
                         manualNwsActive = false
                         blockedTalkgroups.clear()
@@ -153,9 +206,8 @@ jobs:
                         }
 
                         repaint()
-                        syncPreferences(
-                            "Returning to normal scanner talkgroups…",
-                            saveNormal = true
+                        saveNormalPreferences(
+                            "Returning to normal scanner talkgroups…"
                         )
                     }
                 } else {
@@ -185,9 +237,8 @@ jobs:
                     }
 
                     repaint()
-                    syncPreferences(
-                        "Talkgroup choices updated — returning to live calls…",
-                        saveNormal = true
+                    saveNormalPreferences(
+                        "Talkgroup choices updated — returning to live calls…"
                     )
                 }
             }
@@ -200,16 +251,9 @@ jobs:
                     blockedTalkgroups.add(talkgroups[nwsIndex].selectionKey)
                 }
 
-                saveBlockedTalkgroups()
-                updateTalkgroupButton()
-                scope.launch(Dispatchers.IO) { pushListenerPreferences() }
-                if (running) {
-                    scope.launch {
-                        restartScannerAtLiveEdge(
-                            "All normal talkgroups enabled — returning to live calls…"
-                        )
-                    }
-                }
+                saveNormalPreferences(
+                    "All normal talkgroups enabled — returning to live calls…"
+                )
             }
             .setNegativeButton("Done", null)
             .create()
@@ -217,10 +261,85 @@ jobs:
         dialog.show()
     }
 
+    private suspend fun enterManualNwsMode(weatherId: Int) {
+        if (!running || !manualNwsActive) return
+
+        /*
+         * Match the web player: manual NWS selection immediately
+         * plays the newest completed weather-radio segment instead
+         * of waiting for the next roughly minute-long upload.
+         */
+        scannerGeneration += 1
+        val generation = scannerGeneration
+
+        scannerJob?.cancel()
+        scannerJob = null
+        cursor = null
+        liveEdgeReceivedAt = null
+
+        if (controllerFuture.isDone) {
+            try {
+                controllerFuture.get().stop()
+                controllerFuture.get().clearMediaItems()
+            } catch (_: Exception) {
+            }
+        }
+
+        findViewById<TextView>(R.id.status).text =
+            "NWS Weather Radio selected — joining weather audio…"
+        findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
+        findViewById<TextView>(R.id.details).text = ""
+
+        val data = withContext(Dispatchers.IO) {
+            getJson(
+                "/api/call-queue/latest-talkgroup" +
+                    "?talkgroup=$weatherId" +
+                    "&feed=${URLEncoder.encode(selectedFeedSlug, "UTF-8")}" +
+                    "&max_age_seconds=300"
+            )
+        }
+
+        if (
+            !running ||
+            !manualNwsActive ||
+            generation != scannerGeneration
+        ) return
+
+        val call = data?.optJSONObject("call")
+        val validCall =
+            call != null &&
+            call.optString("talkgroup").trim() == weatherId.toString() &&
+            call.optString("audio_url").isNotBlank()
+
+        if (!validCall) {
+            restartScannerAtLiveEdge(
+                "NWS Weather Radio selected — waiting for next weather segment…"
+            )
+            return
+        }
+
+        playCallAndWait(call!!, generation)
+
+        if (
+            running &&
+            manualNwsActive &&
+            generation == scannerGeneration
+        ) {
+            // Continue at the live edge with all normal TGs blocked,
+            // so only future NWS segments can play.
+            restartScannerAtLiveEdge(
+                "NWS Weather Radio — waiting for next segment…"
+            )
+        }
+    }
+
 '''
           s = s[:start] + replacement + s[end:]
 
-          # Keep NWS exclusive if the server refreshes the TG list while NWS is active.
+          # --------------------------------------------------
+          # Keep NWS exclusive if the server refreshes TGIDs
+          # while the chooser is open or while NWS is playing.
+          # --------------------------------------------------
           old = '''        talkgroups.clear()
         talkgroups.addAll(incoming)
 
@@ -248,6 +367,7 @@ jobs:
                 loadSavedBlockedTalkgroups()
             }
         } else if (currentNwsOption != null) {
+            // NWS defaults OFF during ordinary scanner mode.
             blockedTalkgroups.add(currentNwsOption.selectionKey)
         }
 
@@ -264,6 +384,9 @@ jobs:
 
           main.write_text(s)
 
+          # --------------------------------------------------
+          # New Google Play version.
+          # --------------------------------------------------
           g = gradle.read_text()
           g = re.sub(r'versionCode\s*=\s*\d+', 'versionCode = 22', g, count=1)
           g = re.sub(r'versionName\s*=\s*"[^"]+"', 'versionName = "0.2.20"', g, count=1)
@@ -273,18 +396,24 @@ jobs:
           required = [
               'private var manualNwsActive = false',
               'preNwsBlockedTalkgroups',
-              'NWS Weather Radio selected — normal talkgroups paused',
               'checked[i] = i == nwsIndex',
+              'enterManualNwsMode',
+              '/api/call-queue/latest-talkgroup',
+              'max_age_seconds=300',
               'currentNwsOption',
           ]
           for item in required:
               if item not in check:
                   raise SystemExit(f'missing validation marker: {item}')
 
-          if 'versionCode = 22' not in gradle.read_text() or 'versionName = "0.2.20"' not in gradle.read_text():
+          if 'minusSeconds(45)' in check:
+              raise SystemExit('45-second busy-feed call drop guard still present')
+
+          gv = gradle.read_text()
+          if 'versionCode = 22' not in gv or 'versionName = "0.2.20"' not in gv:
               raise SystemExit('version bump failed')
 
-          print('Android 0.2.20 NWS exclusive selector patch validated')
+          print('Android 0.2.20 NWS parity + no-call-loss patch validated')
           PY
 
       - name: Commit source update
@@ -295,7 +424,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app/src/main/java/net/aaronznetworking/scanner/MainActivity.kt app/build.gradle.kts
           if ! git diff --cached --quiet; then
-            git commit -m "Fix Android NWS exclusive talkgroup selection in 0.2.20"
+            git commit -m "Android 0.2.20: NWS parity and no-call-loss queue"
             git push
           fi
 
