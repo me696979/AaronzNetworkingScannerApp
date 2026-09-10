@@ -1,0 +1,36 @@
+name: Apply Android 0.2.21 Source Changes
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/apply-0.2.21-source.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply 0.2.21 source migration
+        run: python3 tools/apply_0_2_21.py
+
+      - name: Commit migrated source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/net/aaronznetworking/scanner/MainActivity.kt app/build.gradle.kts
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Android 0.2.21 live resume and NWS source fixes'
+          git push
