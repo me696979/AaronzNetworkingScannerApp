@@ -95,6 +95,7 @@ class MainActivity : AppCompatActivity() {
     private var weatherRadioTalkgroup: String? = null
     private var weatherCollapsed = true
     private var audioFocusLostAt = 0L
+    private var appBackgroundedAt = 0L
 
     private var textToSpeech: TextToSpeech? = null
     private var textToSpeechReady = false
@@ -147,6 +148,8 @@ class MainActivity : AppCompatActivity() {
 
     private val talkgroups = mutableListOf<TalkgroupOption>()
     private val blockedTalkgroups = mutableSetOf<String>()
+    private var manualNwsActive = false
+    private var preNwsBlockedTalkgroups: Set<String>? = null
     private val pendingTranscripts = linkedMapOf<String, String>()
     private val seenTranscriptIds = mutableSetOf<String>()
     private val recentTranscripts = mutableListOf<TranscriptEntry>()
@@ -332,17 +335,55 @@ class MainActivity : AppCompatActivity() {
             loadTalkgroups()
         }
 
+        val now = System.currentTimeMillis()
+        val backgroundedFor =
+            if (appBackgroundedAt > 0L) now - appBackgroundedAt else 0L
+
+        /*
+         * Android may suspend the Activity's scanner loop while the app is in
+         * the background. If we return after a meaningful background period,
+         * discard the old cursor and rejoin the server's current live edge.
+         *
+         * IMPORTANT: ordinary radio silence does NOT trigger this. The scanner
+         * can sit idle for hours and still play the very next live call.
+         */
+        if (
+            running &&
+            backgroundedFor >= 15000L &&
+            !weatherInterrupting &&
+            !manualNwsActive
+        ) {
+            appBackgroundedAt = 0L
+            audioFocusLostAt = 0L
+            scope.launch {
+                restartScannerAtLiveEdge(
+                    "App resumed — returning to live calls…"
+                )
+            }
+            return
+        }
+
+        appBackgroundedAt = 0L
+
         if (
             running &&
             audioFocusLostAt > 0 &&
-            System.currentTimeMillis() - audioFocusLostAt >= 2500 &&
-            !weatherInterrupting
+            now - audioFocusLostAt >= 2500 &&
+            !weatherInterrupting &&
+            !manualNwsActive
         ) {
             audioFocusLostAt = 0L
             scope.launch {
                 restartScannerAtLiveEdge("Returning to live calls…")
             }
         }
+    }
+
+    override fun onStop() {
+        if (running) {
+            appBackgroundedAt = System.currentTimeMillis()
+        }
+        super.onStop()
     }
 
     private fun startLiveEvents() {
@@ -463,7 +504,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         scope.launch {
-            restartScannerAtLiveEdge("Starting at live edge…")
+            val nwsId = weatherRadioTalkgroup?.trim()?.toIntOrNull()
+            if (manualNwsActive && nwsId != null) {
+                enterManualNwsMode(nwsId)
+            } else {
+                restartScannerAtLiveEdge("Starting at live edge…")
+            }
         }
     }
 
@@ -548,6 +594,7 @@ class MainActivity : AppCompatActivity() {
         scannerJob = null
         cursor = null
         audioFocusLostAt = 0L
+        appBackgroundedAt = 0L
 
         scope.launch(Dispatchers.IO) {
             sendListenerLeave()
@@ -603,12 +650,6 @@ class MainActivity : AppCompatActivity() {
 
             val edgeTime = liveEdgeReceivedAt
             if (edgeTime != null && callReceivedAt != null && !callReceivedAt.isAfter(edgeTime)) {
-                continue
-            }
-
-            // Hard freshness guard. A live scanner should never work through a
-            // stored backlog after startup, reconnect, or a feed change.
-            if (callReceivedAt != null && callReceivedAt.isBefore(Instant.now().minusSeconds(45))) {
                 continue
             }
 
@@ -903,7 +944,7 @@ class MainActivity : AppCompatActivity() {
         val labels = feeds.map { if (it.location.isBlank()) it.name else "${it.name} • ${it.location}" }.toTypedArray()
         val checked = feeds.indexOfFirst { it.slug == selectedFeedSlug }
         AlertDialog.Builder(this).setTitle("Select Scanner Feed").setSingleChoiceItems(labels, checked) { dialog, which ->
-            applySelectedFeed(feeds[which]); talkgroups.clear(); blockedTalkgroups.clear(); loadSavedBlockedTalkgroups()
+            manualNwsActive = false; preNwsBlockedTalkgroups = null; applySelectedFeed(feeds[which]); talkgroups.clear(); blockedTalkgroups.clear(); loadSavedBlockedTalkgroups()
             scope.launch { loadTalkgroups(); if (running) restartScannerAtLiveEdge("Feed changed — returning to live calls…") }
             dialog.dismiss()
         }.setNegativeButton("Cancel", null).show()
@@ -978,6 +1019,26 @@ class MainActivity : AppCompatActivity() {
         talkgroups.clear()
         talkgroups.addAll(incoming)
 
+        val currentNwsRawId = weatherRadioTalkgroup?.trim()?.toIntOrNull()
+        val currentNwsOption = incoming.firstOrNull { option ->
+            currentNwsRawId != null && currentNwsRawId in option.allIds
+        }
+
+        if (manualNwsActive) {
+            if (currentNwsOption != null) {
+                blockedTalkgroups.clear()
+                incoming
+                    .filter { it.selectionKey != currentNwsOption.selectionKey }
+                    .forEach { blockedTalkgroups.add(it.selectionKey) }
+            } else {
+                manualNwsActive = false
+                preNwsBlockedTalkgroups = null
+                loadSavedBlockedTalkgroups()
+            }
+        } else if (currentNwsOption != null) {
+            blockedTalkgroups.add(currentNwsOption.selectionKey)
+        }
+
         val legacyBlocked = blockedTalkgroups
             .filter { it.all(Char::isDigit) }
             .mapNotNull { it.toIntOrNull() }
@@ -1041,32 +1102,171 @@ class MainActivity : AppCompatActivity() {
             "$prefix ${tg.talkgroupIds} • ${tg.name}"
         }.toTypedArray()
 
-        val checked = BooleanArray(talkgroups.size) { index ->
-            talkgroups[index].selectionKey !in blockedTalkgroups
+        val nwsRawId = weatherRadioTalkgroup?.trim()?.toIntOrNull()
+        val nwsIndex = talkgroups.indexOfFirst { tg ->
+            nwsRawId != null && nwsRawId in tg.allIds
         }
 
-        AlertDialog.Builder(this)
+        val checked = BooleanArray(talkgroups.size) { index ->
+            if (manualNwsActive && nwsIndex >= 0) {
+                index == nwsIndex
+            } else {
+                talkgroups[index].selectionKey !in blockedTalkgroups
+            }
+        }
+
+        lateinit var dialog: AlertDialog
+
+        fun repaint() {
+            for (i in checked.indices) {
+                dialog.listView.setItemChecked(i, checked[i])
+            }
+        }
+
+        fun pushTemporaryPreferences() {
+            updateTalkgroupButton()
+            scope.launch(Dispatchers.IO) { pushListenerPreferences() }
+        }
+
+        fun saveNormalPreferences(message: String) {
+            saveBlockedTalkgroups()
+            updateTalkgroupButton()
+            scope.launch(Dispatchers.IO) { pushListenerPreferences() }
+            if (running) {
+                scope.launch { restartScannerAtLiveEdge(message) }
+            }
+        }
+
+        dialog = AlertDialog.Builder(this)
             .setTitle("Choose Talkgroups")
             .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
-                checked[which] = isChecked
-            }
-            .setPositiveButton("Save") { _, _ ->
-                blockedTalkgroups.clear()
-                for (i in talkgroups.indices) {
-                    if (!checked[i]) blockedTalkgroups.add(talkgroups[i].selectionKey)
+                if (nwsIndex >= 0 && which == nwsIndex) {
+                    if (isChecked) {
+                        if (!manualNwsActive) {
+                            preNwsBlockedTalkgroups = blockedTalkgroups.toSet()
+                        }
+
+                        manualNwsActive = true
+                        blockedTalkgroups.clear()
+                        for (i in talkgroups.indices) {
+                            checked[i] = i == nwsIndex
+                            if (i != nwsIndex) {
+                                blockedTalkgroups.add(talkgroups[i].selectionKey)
+                            }
+                        }
+
+                        repaint()
+                        pushTemporaryPreferences()
+
+                        if (running && nwsRawId != null) {
+                            scope.launch { enterManualNwsMode(nwsRawId) }
+                        }
+                    } else {
+                        manualNwsActive = false
+                        blockedTalkgroups.clear()
+                        preNwsBlockedTalkgroups?.let {
+                            blockedTalkgroups.addAll(it)
+                        } ?: loadSavedBlockedTalkgroups()
+                        preNwsBlockedTalkgroups = null
+
+                        blockedTalkgroups.add(talkgroups[nwsIndex].selectionKey)
+                        for (i in talkgroups.indices) {
+                            checked[i] = talkgroups[i].selectionKey !in blockedTalkgroups
+                        }
+
+                        repaint()
+                        saveNormalPreferences("Returning to normal scanner talkgroups…")
+                    }
+                } else {
+                    if (manualNwsActive) {
+                        manualNwsActive = false
+                        blockedTalkgroups.clear()
+                        preNwsBlockedTalkgroups?.let {
+                            blockedTalkgroups.addAll(it)
+                        } ?: loadSavedBlockedTalkgroups()
+                        preNwsBlockedTalkgroups = null
+                        if (nwsIndex >= 0) {
+                            blockedTalkgroups.add(talkgroups[nwsIndex].selectionKey)
+                        }
+                    }
+
+                    val key = talkgroups[which].selectionKey
+                    if (isChecked) blockedTalkgroups.remove(key)
+                    else blockedTalkgroups.add(key)
+
+                    for (i in talkgroups.indices) {
+                        checked[i] = talkgroups[i].selectionKey !in blockedTalkgroups
+                    }
+                    repaint()
+                    saveNormalPreferences("Talkgroup choices updated — returning to live calls…")
                 }
-                saveBlockedTalkgroups()
-                updateTalkgroupButton()
-                scope.launch(Dispatchers.IO) { pushListenerPreferences() }
             }
-            .setNeutralButton("Enable All") { _, _ ->
+            .setNeutralButton("Enable All Normal") { _, _ ->
+                manualNwsActive = false
+                preNwsBlockedTalkgroups = null
                 blockedTalkgroups.clear()
-                saveBlockedTalkgroups()
-                updateTalkgroupButton()
-                scope.launch(Dispatchers.IO) { pushListenerPreferences() }
+                if (nwsIndex >= 0) {
+                    blockedTalkgroups.add(talkgroups[nwsIndex].selectionKey)
+                }
+                saveNormalPreferences("All normal talkgroups enabled — returning to live calls…")
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+            .setNegativeButton("Done", null)
+            .create()
+
+        dialog.show()
+    }
+
+    private suspend fun enterManualNwsMode(weatherId: Int) {
+        if (!running || !manualNwsActive) return
+
+        scannerGeneration += 1
+        val generation = scannerGeneration
+        scannerJob?.cancel()
+        scannerJob = null
+        cursor = null
+        liveEdgeReceivedAt = null
+
+        if (controllerFuture.isDone) {
+            try {
+                controllerFuture.get().stop()
+                controllerFuture.get().clearMediaItems()
+            } catch (_: Exception) {
+            }
+        }
+
+        findViewById<TextView>(R.id.status).text =
+            "NWS Weather Radio selected — joining weather audio…"
+        findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
+        findViewById<TextView>(R.id.details).text = ""
+
+        val data = withContext(Dispatchers.IO) {
+            getJson(
+                "/api/call-queue/latest-talkgroup" +
+                    "?talkgroup=$weatherId" +
+                    "&feed=${URLEncoder.encode(selectedFeedSlug, "UTF-8")}" +
+                    "&max_age_seconds=300"
+            )
+        }
+
+        if (!running || !manualNwsActive || generation != scannerGeneration) return
+
+        val call = data?.optJSONObject("call")
+        val validCall = call != null &&
+            call.optString("talkgroup").trim() == weatherId.toString() &&
+            call.optString("audio_url").isNotBlank()
+
+        if (!validCall) {
+            restartScannerAtLiveEdge(
+                "NWS Weather Radio selected — waiting for next weather segment…"
+            )
+            return
+        }
+
+        playCallAndWait(call!!, generation)
+
+        if (running && manualNwsActive && generation == scannerGeneration) {
+            restartScannerAtLiveEdge("NWS Weather Radio — waiting for next segment…")
+        }
     }
 
     private fun pushListenerPreferences(): JSONObject? = try {
