@@ -1,0 +1,139 @@
+name: Apply 0.2.22 Dangerous Weather Update
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-0.2.22-dangerous-weather.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply Android 0.2.22 dangerous weather behavior
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('app/src/main/java/net/aaronznetworking/scanner/MainActivity.kt')
+          s = p.read_text()
+
+          old = '''                val headline = alert.optString("headline", "")
+                val severity = alert.optString("severity", "")
+
+                display.add(
+                    buildList {
+                        add("⚠ $event")
+                        if (area.isNotBlank()) add(area)
+                        if (severity.isNotBlank()) add(severity)
+                        if (headline.isNotBlank()) add(headline)
+                    }.joinToString("\\n")
+                )'''
+
+          new = '''                val headline = alert.optString("headline", "")
+                val severity = alert.optString("severity", "")
+                val description = alert.optString("description", "").trim()
+                val instruction = alert.optString("instruction", "").trim()
+
+                display.add(
+                    buildList {
+                        add("⚠ $event")
+                        if (area.isNotBlank()) add(area)
+                        if (severity.isNotBlank()) add(severity)
+                        if (headline.isNotBlank()) add(headline)
+                        if (description.isNotBlank()) add(description)
+                        if (instruction.isNotBlank() && instruction != description) {
+                            add("Instructions: $instruction")
+                        }
+                    }.joinToString("\\n")
+                )'''
+
+          if old not in s:
+              raise SystemExit('ERROR: weather display block not found')
+          s = s.replace(old, new, 1)
+
+          old_classifier = '''    private fun weatherAlertShouldInterrupt(alert: JSONObject): Boolean {
+        val severity = alert.optString("severity").lowercase(Locale.US)
+        val event = alert.optString("event").lowercase(Locale.US)
+        return severity == "extreme" || severity == "severe" ||
+            event.contains("warning") || event.contains("emergency")
+    }'''
+
+          new_classifier = '''    private fun weatherAlertShouldInterrupt(alert: JSONObject): Boolean {
+        val severity = alert.optString("severity").lowercase(Locale.US)
+        val event = alert.optString("event").lowercase(Locale.US)
+        val text = listOf(
+            event,
+            alert.optString("headline", ""),
+            alert.optString("description", ""),
+            alert.optString("instruction", "")
+        ).joinToString(" ").lowercase(Locale.US)
+
+        if (severity == "extreme" || severity == "severe") return true
+        if (event.contains("warning") || event.contains("emergency")) return true
+
+        val dangerousWatches = listOf(
+            "tornado watch",
+            "severe thunderstorm watch",
+            "flood watch",
+            "winter storm watch",
+            "ice storm watch",
+            "excessive heat watch",
+            "fire weather watch"
+        )
+        if (dangerousWatches.any { event.contains(it) }) return true
+
+        if (event.contains("special weather statement")) {
+            val hazardousTerms = listOf(
+                "strong thunderstorm",
+                "strong thunderstorms",
+                "damaging wind",
+                "strong wind",
+                "wind gust",
+                "hail",
+                "frequent lightning",
+                "torrential rain",
+                "flash flood",
+                "flooding",
+                "dangerous heat",
+                "heat index",
+                "heat indices",
+                "heat illness",
+                "significant icing",
+                "heavy snow",
+                "snow squall"
+            )
+            if (hazardousTerms.any { text.contains(it) }) return true
+        }
+
+        return false
+    }'''
+
+          if old_classifier not in s:
+              raise SystemExit('ERROR: weather classifier block not found')
+          s = s.replace(old_classifier, new_classifier, 1)
+          p.write_text(s)
+
+          g = Path('app/build.gradle.kts')
+          gradle = g.read_text()
+          gradle = gradle.replace('versionCode = 23', 'versionCode = 24', 1)
+          gradle = gradle.replace('versionName = "0.2.21"', 'versionName = "0.2.22"', 1)
+          g.write_text(gradle)
+
+          print('Applied 0.2.22 full weather details and dangerous-weather interruption rules')
+          PY
+
+      - name: Commit update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/net/aaronznetworking/scanner/MainActivity.kt app/build.gradle.kts
+          git diff --cached --quiet && { echo 'No changes to commit'; exit 0; }
+          git commit -m "Android 0.2.22 dangerous weather alerts"
+          git push
