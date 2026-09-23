@@ -286,18 +286,20 @@
                 android:textColor="#D8F7DE"
                 android:fontFamily="monospace" />
 
-            <CheckBox
-                android:id="@+id/weatherNwsRepeatEnabled"
+            <Button
+                android:id="@+id/weatherRadioButton"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Repeat Weather Radio Every 5 Minutes"
+                android:text="NOAA WEATHER RADIO UNAVAILABLE"
+                android:textStyle="bold"
                 android:textColor="#D8F7DE"
-                android:fontFamily="monospace" />
+                android:backgroundTint="#173D20"
+                android:layout_marginTop="10dp" />
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Serious warnings can play the alert tone, read official NWS text, switch to about 60 seconds of Weather Radio, then return to live calls. Weather Radio repeats every 5 minutes only when enabled."
+                android:text="Weather alerts stay on screen with their full official details. Alert sound and read-aloud are optional. NOAA Weather Radio is manual only and never takes over the scanner automatically."
                 android:textColor="#6F8E76"
                 android:textSize="10sp"
                 android:fontFamily="monospace"
