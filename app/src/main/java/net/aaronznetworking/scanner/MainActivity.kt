@@ -88,8 +88,6 @@ class MainActivity : AppCompatActivity() {
     private var weatherPolling = false
     private var weatherRefreshPending = false
     private var locationPermissionRequested = false
-    private var lastWeatherTakeoverAt = 0L
-    private var activeSeriousWeatherAlert: JSONObject? = null
     private val feeds = mutableListOf<FeedOption>()
     private var selectedFeedSlug = "wv-cabell-001"
     private var weatherRadioTalkgroup: String? = null
@@ -934,9 +932,7 @@ class MainActivity : AppCompatActivity() {
         weatherRadioTalkgroup = feed.weatherRadioTalkgroup
         prefs.edit().putString("selected_feed_slug", feed.slug).apply()
         findViewById<Button>(R.id.feedButton).text = "FEED: ${feed.name}"
-        val nws = findViewById<CheckBox>(R.id.weatherNwsRepeatEnabled)
-        nws.visibility = if (weatherRadioTalkgroup == null) View.GONE else View.VISIBLE
-        if (weatherRadioTalkgroup == null) nws.isChecked = false
+        updateWeatherRadioButton()
     }
 
     private fun showFeedDialog() {
@@ -1088,132 +1084,72 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showTalkgroupDialog() {
-        if (talkgroups.isEmpty()) {
+        val nwsRawId = weatherRadioTalkgroup?.trim()?.toIntOrNull()
+        val normalTalkgroups = talkgroups.filter { tg ->
+            nwsRawId == null || nwsRawId !in tg.allIds
+        }
+
+        if (normalTalkgroups.isEmpty()) {
             AlertDialog.Builder(this)
                 .setTitle("Talkgroups")
-                .setMessage("No talkgroups are currently available.")
+                .setMessage("No normal scanner talkgroups are currently available.")
                 .setPositiveButton("OK", null)
                 .show()
             return
         }
 
-        val labels = talkgroups.map { tg ->
+        val labels = normalTalkgroups.map { tg ->
             val prefix = if (tg.talkgroupIds.contains(',')) "TGIDs" else "TGID"
             "$prefix ${tg.talkgroupIds} • ${tg.name}"
         }.toTypedArray()
 
-        val nwsRawId = weatherRadioTalkgroup?.trim()?.toIntOrNull()
-        val nwsIndex = talkgroups.indexOfFirst { tg ->
-            nwsRawId != null && nwsRawId in tg.allIds
+        val checked = BooleanArray(normalTalkgroups.size) { index ->
+            normalTalkgroups[index].selectionKey !in blockedTalkgroups
         }
 
-        val checked = BooleanArray(talkgroups.size) { index ->
-            if (manualNwsActive && nwsIndex >= 0) {
-                index == nwsIndex
-            } else {
-                talkgroups[index].selectionKey !in blockedTalkgroups
-            }
-        }
-
-        lateinit var dialog: AlertDialog
-
-        fun repaint() {
-            for (i in checked.indices) {
-                dialog.listView.setItemChecked(i, checked[i])
-            }
-        }
-
-        fun pushTemporaryPreferences() {
-            updateTalkgroupButton()
-            scope.launch(Dispatchers.IO) { pushListenerPreferences() }
-        }
-
-        fun saveNormalPreferences(message: String) {
-            saveBlockedTalkgroups()
-            updateTalkgroupButton()
-            scope.launch(Dispatchers.IO) { pushListenerPreferences() }
-            if (running) {
-                scope.launch { restartScannerAtLiveEdge(message) }
-            }
-        }
-
-        dialog = AlertDialog.Builder(this)
+        AlertDialog.Builder(this)
             .setTitle("Choose Talkgroups")
             .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
-                if (nwsIndex >= 0 && which == nwsIndex) {
-                    if (isChecked) {
-                        if (!manualNwsActive) {
-                            preNwsBlockedTalkgroups = blockedTalkgroups.toSet()
-                        }
+                if (manualNwsActive) return@setMultiChoiceItems
 
-                        manualNwsActive = true
-                        blockedTalkgroups.clear()
-                        for (i in talkgroups.indices) {
-                            checked[i] = i == nwsIndex
-                            if (i != nwsIndex) {
-                                blockedTalkgroups.add(talkgroups[i].selectionKey)
-                            }
-                        }
+                val key = normalTalkgroups[which].selectionKey
+                if (isChecked) blockedTalkgroups.remove(key)
+                else blockedTalkgroups.add(key)
 
-                        repaint()
-                        pushTemporaryPreferences()
-
-                        if (running && nwsRawId != null) {
-                            scope.launch { enterManualNwsMode(nwsRawId) }
-                        }
-                    } else {
-                        manualNwsActive = false
-                        blockedTalkgroups.clear()
-                        preNwsBlockedTalkgroups?.let {
-                            blockedTalkgroups.addAll(it)
-                        } ?: loadSavedBlockedTalkgroups()
-                        preNwsBlockedTalkgroups = null
-
-                        blockedTalkgroups.add(talkgroups[nwsIndex].selectionKey)
-                        for (i in talkgroups.indices) {
-                            checked[i] = talkgroups[i].selectionKey !in blockedTalkgroups
-                        }
-
-                        repaint()
-                        saveNormalPreferences("Returning to normal scanner talkgroups…")
+                saveBlockedTalkgroups()
+                updateTalkgroupButton()
+                scope.launch(Dispatchers.IO) { pushListenerPreferences() }
+                if (running) {
+                    scope.launch {
+                        restartScannerAtLiveEdge(
+                            "Talkgroup choices updated — returning to live calls…"
+                        )
                     }
-                } else {
-                    if (manualNwsActive) {
-                        manualNwsActive = false
-                        blockedTalkgroups.clear()
-                        preNwsBlockedTalkgroups?.let {
-                            blockedTalkgroups.addAll(it)
-                        } ?: loadSavedBlockedTalkgroups()
-                        preNwsBlockedTalkgroups = null
-                        if (nwsIndex >= 0) {
-                            blockedTalkgroups.add(talkgroups[nwsIndex].selectionKey)
-                        }
-                    }
-
-                    val key = talkgroups[which].selectionKey
-                    if (isChecked) blockedTalkgroups.remove(key)
-                    else blockedTalkgroups.add(key)
-
-                    for (i in talkgroups.indices) {
-                        checked[i] = talkgroups[i].selectionKey !in blockedTalkgroups
-                    }
-                    repaint()
-                    saveNormalPreferences("Talkgroup choices updated — returning to live calls…")
                 }
             }
             .setNeutralButton("Enable All Normal") { _, _ ->
-                manualNwsActive = false
-                preNwsBlockedTalkgroups = null
-                blockedTalkgroups.clear()
-                if (nwsIndex >= 0) {
-                    blockedTalkgroups.add(talkgroups[nwsIndex].selectionKey)
+                if (!manualNwsActive) {
+                    blockedTalkgroups.clear()
+                    val nwsOption = talkgroups.firstOrNull { tg ->
+                        nwsRawId != null && nwsRawId in tg.allIds
+                    }
+                    if (nwsOption != null) {
+                        blockedTalkgroups.add(nwsOption.selectionKey)
+                    }
+                    saveBlockedTalkgroups()
+                    updateTalkgroupButton()
+                    scope.launch(Dispatchers.IO) { pushListenerPreferences() }
+                    if (running) {
+                        scope.launch {
+                            restartScannerAtLiveEdge(
+                                "All normal talkgroups enabled — returning to live calls…"
+                            )
+                        }
+                    }
                 }
-                saveNormalPreferences("All normal talkgroups enabled — returning to live calls…")
             }
             .setNegativeButton("Done", null)
-            .create()
-
-        dialog.show()
+            .show()
     }
 
     private suspend fun enterManualNwsMode(weatherId: Int) {
@@ -1300,7 +1236,7 @@ class MainActivity : AppCompatActivity() {
         val alertsEnabled = findViewById<CheckBox>(R.id.weatherAlertsEnabled)
         val soundEnabled = findViewById<CheckBox>(R.id.weatherAlertSoundEnabled)
         val speechEnabled = findViewById<CheckBox>(R.id.weatherAlertSpeechEnabled)
-        val repeatEnabled = findViewById<CheckBox>(R.id.weatherNwsRepeatEnabled)
+        val nwsButton = findViewById<Button>(R.id.weatherRadioButton)
 
         val mode = prefs.getString("weather_location_mode", "current") ?: "current"
         locationRadio.isChecked = mode == "current"
@@ -1310,14 +1246,39 @@ class MainActivity : AppCompatActivity() {
 
         alertsEnabled.isChecked = prefs.getBoolean("weather_alerts_enabled", false)
         soundEnabled.isChecked = prefs.getBoolean("weather_alert_sound_enabled", false)
-        speechEnabled.isChecked = prefs.getBoolean("weather_alert_speech_enabled", true)
-        repeatEnabled.isChecked = prefs.getBoolean("weather_nws_repeat_enabled", true)
+        speechEnabled.isChecked = prefs.getBoolean("weather_alert_speech_enabled", false)
+
+        nwsButton.setOnClickListener {
+            val nwsId = weatherRadioTalkgroup?.trim()?.toIntOrNull()
+            if (manualNwsActive) {
+                exitManualNwsMode()
+            } else if (nwsId != null) {
+                preNwsBlockedTalkgroups = blockedTalkgroups.toSet()
+                manualNwsActive = true
+                blockedTalkgroups.clear()
+
+                val nwsOption = talkgroups.firstOrNull { nwsId in it.allIds }
+                talkgroups
+                    .filter { it.selectionKey != nwsOption?.selectionKey }
+                    .forEach { blockedTalkgroups.add(it.selectionKey) }
+
+                updateWeatherRadioButton()
+                updateTalkgroupButton()
+                scope.launch(Dispatchers.IO) { pushListenerPreferences() }
+
+                if (running) {
+                    scope.launch { enterManualNwsMode(nwsId) }
+                } else {
+                    findViewById<TextView>(R.id.status).text =
+                        "NWS Weather Radio selected — press START SCANNER."
+                }
+            }
+        }
 
         findViewById<RadioGroup>(R.id.weatherLocationGroup).setOnCheckedChangeListener { _, checkedId ->
             val newMode = if (checkedId == R.id.weatherUseZip) "zip" else "current"
             prefs.edit().putString("weather_location_mode", newMode).apply()
             zipRow.visibility = if (newMode == "zip") View.VISIBLE else View.GONE
-
             if (newMode == "current") requestLocationPermissionIfNeeded()
             scope.launch { updateWeather() }
         }
@@ -1354,11 +1315,54 @@ class MainActivity : AppCompatActivity() {
             prefs.edit().putBoolean("weather_alert_speech_enabled", checked).apply()
         }
 
-        repeatEnabled.setOnCheckedChangeListener { _, checked ->
-            prefs.edit().putBoolean("weather_nws_repeat_enabled", checked).apply()
+        updateWeatherRadioButton()
+        if (mode == "current") requestLocationPermissionIfNeeded()
+    }
+
+    private fun updateWeatherRadioButton() {
+        val button = findViewById<Button>(R.id.weatherRadioButton)
+        val available = weatherRadioTalkgroup?.trim()?.toIntOrNull() != null
+
+        button.visibility = View.VISIBLE
+        button.text = when {
+            manualNwsActive -> "RETURN TO SCANNER"
+            available -> "LISTEN TO NOAA WEATHER RADIO"
+            else -> "NOAA WEATHER RADIO UNAVAILABLE"
+        }
+        button.isEnabled = manualNwsActive || available
+        button.alpha = if (button.isEnabled) 1.0f else 0.42f
+    }
+
+    private fun exitManualNwsMode() {
+        manualNwsActive = false
+        blockedTalkgroups.clear()
+        preNwsBlockedTalkgroups?.let {
+            blockedTalkgroups.addAll(it)
+        } ?: loadSavedBlockedTalkgroups()
+        preNwsBlockedTalkgroups = null
+
+        val nwsRawId = weatherRadioTalkgroup?.trim()?.toIntOrNull()
+        val nwsOption = talkgroups.firstOrNull { tg ->
+            nwsRawId != null && nwsRawId in tg.allIds
+        }
+        if (nwsOption != null) {
+            blockedTalkgroups.add(nwsOption.selectionKey)
         }
 
-        if (mode == "current") requestLocationPermissionIfNeeded()
+        saveBlockedTalkgroups()
+        updateWeatherRadioButton()
+        updateTalkgroupButton()
+        scope.launch(Dispatchers.IO) { pushListenerPreferences() }
+
+        if (running) {
+            scope.launch {
+                restartScannerAtLiveEdge(
+                    "Returning to normal scanner talkgroups…"
+                )
+            }
+        } else {
+            findViewById<TextView>(R.id.status).text = "Ready."
+        }
     }
 
     private fun requestLocationPermissionIfNeeded() {
@@ -1541,13 +1545,30 @@ class MainActivity : AppCompatActivity() {
                 val area = alert.optString("area", "")
                 val headline = alert.optString("headline", "")
                 val severity = alert.optString("severity", "")
+                val urgency = alert.optString("urgency", "")
+                val expires = alert.optString("expires", "")
+                val description = alert.optString("description", "")
+                val instruction = alert.optString("instruction", "")
+                val messageType = alert.optString("message_type", "")
 
                 display.add(
                     buildList {
                         add("⚠ $event")
-                        if (area.isNotBlank()) add(area)
-                        if (severity.isNotBlank()) add(severity)
                         if (headline.isNotBlank()) add(headline)
+                        if (area.isNotBlank()) add("Area: $area")
+                        if (severity.isNotBlank()) add("Severity: $severity")
+                        if (urgency.isNotBlank()) add("Urgency: $urgency")
+                        if (messageType.isNotBlank()) add("Message: $messageType")
+                        if (expires.isNotBlank()) add("Expires: $expires")
+                        if (description.isNotBlank()) {
+                            add("")
+                            add(description.trim())
+                        }
+                        if (instruction.isNotBlank()) {
+                            add("")
+                            add("Instructions:")
+                            add(instruction.trim())
+                        }
                     }.joinToString("\n")
                 )
 
@@ -1558,7 +1579,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             findViewById<TextView>(R.id.weatherAlertsText).text =
-                display.joinToString("\n\n")
+                display.joinToString("\n\n────────────────────\n\n")
 
             prefs.edit()
                 .putStringSet("seen_weather_alert_ids", seen.toList().takeLast(200).toSet())
@@ -1568,29 +1589,10 @@ class MainActivity : AppCompatActivity() {
                 .map { alerts.getJSONObject(it) }
                 .firstOrNull { weatherAlertShouldInterrupt(it) }
 
-            activeSeriousWeatherAlert = seriousActive
             updateWeatherCollapseForAlert(seriousActive != null)
 
-            val now = System.currentTimeMillis()
-            val repeatDue =
-                seriousActive != null &&
-                weatherRadioTalkgroup != null &&
-                prefs.getBoolean("weather_nws_repeat_enabled", true) &&
-                lastWeatherTakeoverAt > 0L &&
-                now - lastWeatherTakeoverAt >= WeatherTakeoverConfig.REPEAT_MS
-
-            when {
-                newSerious.isNotEmpty() ->
-                    runWeatherAlertInterruption(
-                        newSerious.first(),
-                        initial = true
-                    )
-
-                repeatDue ->
-                    runWeatherAlertInterruption(
-                        seriousActive!!,
-                        initial = false
-                    )
+            if (newSerious.isNotEmpty()) {
+                notifyWeatherAlert(newSerious.first())
             }
         } finally {
             weatherPolling = false
@@ -1619,51 +1621,21 @@ class MainActivity : AppCompatActivity() {
             event.contains("warning") || event.contains("emergency")
     }
 
-    private suspend fun runWeatherAlertInterruption(
-        alert: JSONObject,
-        initial: Boolean
-    ) {
-        if (weatherInterrupting) return
-        weatherInterrupting = true
-        lastWeatherTakeoverAt = System.currentTimeMillis()
-        val scannerWasRunning = running
+    private suspend fun notifyWeatherAlert(alert: JSONObject) {
+        findViewById<TextView>(R.id.status).text =
+            "${alert.optString("event", "Weather warning")} — WEATHER ALERT"
 
-        try {
-            if (scannerWasRunning) {
-                scannerGeneration += 1
-                scannerJob?.cancel()
-                scannerJob = null
-                cursor = null
-                if (controllerFuture.isDone) {
-                    try {
-                        controllerFuture.get().stop()
-                        controllerFuture.get().clearMediaItems()
-                    } catch (_: Exception) {}
-                }
-            }
+        if (prefs.getBoolean("weather_alert_sound_enabled", false)) {
+            playWeatherAlertTone()
+        }
 
+        if (prefs.getBoolean("weather_alert_speech_enabled", false)) {
+            speakOfficialWeatherAlert(alert)
+        }
+
+        if (running && !manualNwsActive) {
             findViewById<TextView>(R.id.status).text =
-                "${alert.optString("event", "Weather warning")} — WEATHER ALERT"
-
-            if (initial && prefs.getBoolean("weather_alert_sound_enabled", false)) {
-                playWeatherAlertTone()
-            }
-
-            if (initial && prefs.getBoolean("weather_alert_speech_enabled", true)) {
-                speakOfficialWeatherAlert(alert)
-            }
-
-            if (scannerWasRunning && running) {
-                playLatestNwsSegment()
-            }
-        } finally {
-            weatherInterrupting = false
-
-            if (scannerWasRunning && running) {
-                restartScannerAtLiveEdge(
-                    "Weather alert complete — returning to live calls…"
-                )
-            }
+                "Weather alert received — scanner continuing normally."
         }
     }
 
