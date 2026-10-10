@@ -1803,11 +1803,13 @@ class MainActivity : AppCompatActivity() {
                 val web = stats.optInt("web")
                 val android = stats.optInt("android")
                 val ios = stats.optInt("ios")
+                val scanners = stats.optInt("scanners")
 
                 val breakdown = buildList {
                     add("Web $web")
                     add("App $android")
                     if (ios > 0) add("iOS $ios")
+                    add("Scanners $scanners")
                 }.joinToString(" • ")
 
                 findViewById<TextView>(R.id.listeners).text =
