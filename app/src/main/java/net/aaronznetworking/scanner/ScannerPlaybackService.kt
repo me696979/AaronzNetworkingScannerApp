@@ -72,7 +72,8 @@ class ScannerPlaybackService : MediaSessionService() {
             ACTION_BACKGROUND -> {
                 if (backgroundJob?.isActive != true) {
                     val feed = intent.getStringExtra(EXTRA_FEED) ?: "wv-cabell-001"
-                    backgroundJob = scope.launch { monitorInBackground(feed) }
+                    val resumeAfter = intent.getStringExtra(EXTRA_CURSOR)?.takeIf { it.isNotBlank() }
+                    backgroundJob = scope.launch { monitorInBackground(feed, resumeAfter) }
                 }
             }
             ACTION_FOREGROUND -> {
@@ -96,11 +97,12 @@ class ScannerPlaybackService : MediaSessionService() {
         } catch (_: Exception) { null }
     }
 
-    private suspend fun monitorInBackground(feed: String) {
+    private suspend fun monitorInBackground(feed: String, resumeAfter: String?) {
         val player = session?.player ?: return
         val encoded = URLEncoder.encode(feed, "UTF-8")
-        var cursor: String? = null
-        var edge = Instant.now()
+        var cursor: String? = resumeAfter
+        // Preserve calls queued during the Activity-to-service handoff.
+        var edge = if (resumeAfter == null) Instant.now() else Instant.MIN
         while (currentCoroutineContext().isActive) {
             try {
                 if (cursor == null) {
@@ -162,6 +164,7 @@ class ScannerPlaybackService : MediaSessionService() {
         const val ACTION_BACKGROUND = "net.aaronznetworking.scanner.BACKGROUND"
         const val ACTION_FOREGROUND = "net.aaronznetworking.scanner.FOREGROUND"
         const val EXTRA_FEED = "feed"
+        const val EXTRA_CURSOR = "cursor"
         const val ACTION_STOP_MONITOR = "net.aaronznetworking.scanner.STOP_MONITOR"
         private const val CHANNEL = "scanner_monitoring"
         private const val NOTIFICATION_ID = 1001
