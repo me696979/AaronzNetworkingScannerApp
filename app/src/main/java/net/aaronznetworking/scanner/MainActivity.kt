@@ -371,6 +371,13 @@ class MainActivity : AppCompatActivity() {
 
         appBackgroundedAt = 0L
 
+        // onStop cancels the Activity scanner loop. Always restart it when
+        // returning to the foreground, even after a brief background visit.
+        if (running && scannerJob == null && !weatherInterrupting && !manualNwsActive) {
+            scope.launch { restartScannerAtLiveEdge("Resuming live scanner…") }
+            return
+        }
+
         if (
             running &&
             audioFocusLostAt > 0 &&
