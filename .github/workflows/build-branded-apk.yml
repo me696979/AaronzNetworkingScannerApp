@@ -4,7 +4,7 @@ name: Build Branded Android APK and AAB
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ main, bluetooth-compat-v1.0.1 ]
     paths:
       - 'app/**'
       - '.github/workflows/build-branded-apk.yml'
