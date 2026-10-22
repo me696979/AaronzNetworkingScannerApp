@@ -342,37 +342,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         val now = System.currentTimeMillis()
-        val backgroundedFor =
-            if (appBackgroundedAt > 0L) now - appBackgroundedAt else 0L
-
-        /*
-         * Android may suspend the Activity's scanner loop while the app is in
-         * the background. If we return after a meaningful background period,
-         * discard the old cursor and rejoin the server's current live edge.
-         *
-         * IMPORTANT: ordinary radio silence does NOT trigger this. The scanner
-         * can sit idle for hours and still play the very next live call.
-         */
-        if (
-            running &&
-            backgroundedFor >= 15000L &&
-            !weatherInterrupting &&
-            !manualNwsActive
-        ) {
-            appBackgroundedAt = 0L
-            audioFocusLostAt = 0L
-            scope.launch {
-                restartScannerAtLiveEdge(
-                    "App resumed — returning to live calls…"
-                )
-            }
-            return
-        }
-
         appBackgroundedAt = 0L
 
-        // onStop cancels the Activity scanner loop. Always restart it when
-        // returning to the foreground, even after a brief background visit.
+        // The background service may still be finishing a call. Do not
+        // force a second live-edge reset based only on time spent minimized.
+        // Restart the foreground polling loop once after the handoff.
         if (running && scannerJob == null && !weatherInterrupting && !manualNwsActive) {
             scope.launch { restartScannerAtLiveEdge("Resuming live scanner…") }
             return
@@ -401,6 +375,7 @@ class MainActivity : AppCompatActivity() {
             startService(Intent(this, ScannerPlaybackService::class.java).apply {
                 action = ScannerPlaybackService.ACTION_BACKGROUND
                 putExtra(ScannerPlaybackService.EXTRA_FEED, selectedFeedSlug)
+                putExtra(ScannerPlaybackService.EXTRA_CURSOR, cursor)
             })
         }
         super.onStop()
@@ -687,7 +662,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val latest = json.optString("latest_id", "")
-        if (latest.isNotBlank() && latest != "null" && latest > (cursor ?: "")) {
+        if (latest.isNotBlank() && latest != "null" && calls.length() == 0) {
             cursor = latest
         }
     }
