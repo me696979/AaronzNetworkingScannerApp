@@ -1042,6 +1042,13 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
+        // Server is authoritative: forget selections that no longer exist.
+        // Keep the weather radio entry separate from normal talkgroup choices.
+        val validKeys = incoming.map { it.selectionKey }.toSet()
+        if (blockedTalkgroups.removeAll { it !in validKeys && !it.all(Char::isDigit) }) {
+            saveBlockedTalkgroups()
+        }
+
         talkgroups.clear()
         talkgroups.addAll(incoming)
 
@@ -1107,10 +1114,11 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val existingIds = talkgroups.map { it.selectionKey }.toSet()
-        val blockedExisting = blockedTalkgroups.count { it in existingIds }
-        val enabled = (talkgroups.size - blockedExisting).coerceAtLeast(0)
-        button.text = "TALKGROUPS: $enabled/${talkgroups.size} ENABLED"
+        val nwsId = weatherRadioTalkgroup?.trim()?.toIntOrNull()
+        val normal = talkgroups.filter { tg -> nwsId == null || nwsId !in tg.allIds }
+        val blockedNormal = normal.count { it.selectionKey in blockedTalkgroups }
+        val enabled = (normal.size - blockedNormal).coerceAtLeast(0)
+        button.text = "TALKGROUPS: $enabled/${normal.size} ENABLED"
     }
 
     private fun showTalkgroupDialog() {
