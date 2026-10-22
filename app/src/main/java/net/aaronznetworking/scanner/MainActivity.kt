@@ -74,6 +74,7 @@ class MainActivity : AppCompatActivity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private lateinit var controllerFuture: ListenableFuture<MediaController>
 
+    private val bluetoothKeepAlive by lazy { BluetoothAudioKeepAlive(this) }
     private var running = false
     private var cursor: String? = null
     private var liveEdgeReceivedAt: Instant? = null
@@ -493,6 +494,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startScanner() {
         running = true
+        bluetoothKeepAlive.setScannerActive(true)
         findViewById<Button>(R.id.startButton).text = "STOP SCANNER"
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
@@ -587,6 +589,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopScanner() {
         running = false
+        bluetoothKeepAlive.setScannerActive(false)
         scannerGeneration += 1
         scannerJob?.cancel()
         scannerJob = null
@@ -1874,6 +1877,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        bluetoothKeepAlive.release()
         running = false
         scannerGeneration += 1
         scannerJob?.cancel()
