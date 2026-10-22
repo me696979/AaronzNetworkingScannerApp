@@ -6,6 +6,10 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.net.Uri
+import android.net.ConnectivityManager
+import android.net.Network
+import android.content.Context
+import android.util.Log
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import kotlinx.coroutines.*
@@ -29,9 +33,18 @@ class ScannerPlaybackService : MediaSessionService() {
     private var backgroundJob: Job? = null
     private val http = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build()
     private val base = "https://scannerlive.aaronznetworking.net"
+    private var networkRevision = 0L
+    private var connectivityManager: ConnectivityManager? = null
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) { networkRevision++; Log.i("ScannerNetwork", "Network available") }
+        override fun onLost(network: Network) { networkRevision++; Log.w("ScannerNetwork", "Network lost") }
+    }
 
     override fun onCreate() {
         super.onCreate()
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        try { connectivityManager?.registerDefaultNetworkCallback(networkCallback) }
+        catch (e: Exception) { Log.w("ScannerNetwork", "Network callback unavailable", e) }
 
         val player = ExoPlayer.Builder(this).build().apply {
             setAudioAttributes(
@@ -72,7 +85,8 @@ class ScannerPlaybackService : MediaSessionService() {
             ACTION_BACKGROUND -> {
                 if (backgroundJob?.isActive != true) {
                     val feed = intent.getStringExtra(EXTRA_FEED) ?: "wv-cabell-001"
-                    backgroundJob = scope.launch { monitorInBackground(feed) }
+                    val resumeAfter = intent.getStringExtra(EXTRA_CURSOR)?.takeIf { it.isNotBlank() }
+                    backgroundJob = scope.launch { monitorInBackground(feed, resumeAfter) }
                 }
             }
             ACTION_FOREGROUND -> {
@@ -96,11 +110,12 @@ class ScannerPlaybackService : MediaSessionService() {
         } catch (_: Exception) { null }
     }
 
-    private suspend fun monitorInBackground(feed: String) {
+    private suspend fun monitorInBackground(feed: String, resumeAfter: String?) {
         val player = session?.player ?: return
         val encoded = URLEncoder.encode(feed, "UTF-8")
-        var cursor: String? = null
-        var edge = Instant.now()
+        var cursor: String? = resumeAfter
+        // Preserve calls queued during the Activity-to-service handoff.
+        var edge = if (resumeAfter == null) Instant.now() else Instant.MIN
         while (currentCoroutineContext().isActive) {
             try {
                 if (cursor == null) {
@@ -129,19 +144,35 @@ class ScannerPlaybackService : MediaSessionService() {
                             val audio = call.optString("audio_url")
                             if (audio.isBlank()) continue
                             val url = if (audio.startsWith("https://")) audio else base + audio
-                            player.setMediaItem(MediaItem.fromUri(Uri.parse(url)))
-                            player.prepare()
-                            player.play()
-                            var stalledAt = System.currentTimeMillis()
-                            var lastPosition = -1L
-                            while (currentCoroutineContext().isActive && player.playbackState != Player.STATE_ENDED && player.playerError == null) {
-                                val position = player.currentPosition
-                                if (position > lastPosition + 100) {
-                                    lastPosition = position
-                                    stalledAt = System.currentTimeMillis()
+                            var attempt = 0
+                            var resumePosition = 0L
+                            while (currentCoroutineContext().isActive && attempt < 3) {
+                                attempt++
+                                val revisionAtStart = networkRevision
+                                player.setMediaItem(MediaItem.fromUri(Uri.parse(url)))
+                                player.prepare()
+                                if (resumePosition > 0L) player.seekTo(resumePosition)
+                                player.play()
+                                var stalledAt = System.currentTimeMillis()
+                                var lastPosition = -1L
+                                while (currentCoroutineContext().isActive &&
+                                    player.playbackState != Player.STATE_ENDED &&
+                                    player.playerError == null) {
+                                    val position = player.currentPosition
+                                    if (position > lastPosition + 100) {
+                                        lastPosition = position
+                                        stalledAt = System.currentTimeMillis()
+                                    }
+                                    if (System.currentTimeMillis() - stalledAt > 15000 ||
+                                        (networkRevision != revisionAtStart &&
+                                            System.currentTimeMillis() - stalledAt > 3000)) break
+                                    delay(200)
                                 }
-                                if (System.currentTimeMillis() - stalledAt > 15000) break
-                                delay(200)
+                                if (player.playbackState == Player.STATE_ENDED) break
+                                resumePosition = player.currentPosition.coerceAtLeast(0L)
+                                Log.w("ScannerNetwork", "Playback interrupted for call $id, retry $attempt")
+                                player.stop()
+                                delay((attempt * 1000L).coerceAtMost(3000L))
                             }
                         }
                     }
@@ -162,12 +193,14 @@ class ScannerPlaybackService : MediaSessionService() {
         const val ACTION_BACKGROUND = "net.aaronznetworking.scanner.BACKGROUND"
         const val ACTION_FOREGROUND = "net.aaronznetworking.scanner.FOREGROUND"
         const val EXTRA_FEED = "feed"
+        const val EXTRA_CURSOR = "cursor"
         const val ACTION_STOP_MONITOR = "net.aaronznetworking.scanner.STOP_MONITOR"
         private const val CHANNEL = "scanner_monitoring"
         private const val NOTIFICATION_ID = 1001
     }
 
     override fun onDestroy() {
+        try { connectivityManager?.unregisterNetworkCallback(networkCallback) } catch (_: Exception) {}
         scope.cancel()
         session?.run {
             player.release()
