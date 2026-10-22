@@ -3,6 +3,7 @@ package net.aaronznetworking.scanner
 import android.Manifest
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
@@ -494,6 +495,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun startScanner() {
         running = true
+        ContextCompat.startForegroundService(this, Intent(this, ScannerPlaybackService::class.java).apply {
+            action = ScannerPlaybackService.ACTION_MONITOR
+        })
         bluetoothKeepAlive.setScannerActive(true)
         findViewById<Button>(R.id.startButton).text = "STOP SCANNER"
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
@@ -589,6 +593,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopScanner() {
         running = false
+        startService(Intent(this, ScannerPlaybackService::class.java).apply {
+            action = ScannerPlaybackService.ACTION_STOP_MONITOR
+        })
         bluetoothKeepAlive.setScannerActive(false)
         scannerGeneration += 1
         scannerJob?.cancel()
