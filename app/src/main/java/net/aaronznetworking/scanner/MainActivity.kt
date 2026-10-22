@@ -335,6 +335,12 @@ class MainActivity : AppCompatActivity() {
             loadTalkgroups()
         }
 
+        if (running && appBackgroundedAt > 0L) {
+            startService(Intent(this, ScannerPlaybackService::class.java).apply {
+                action = ScannerPlaybackService.ACTION_FOREGROUND
+            })
+        }
+
         val now = System.currentTimeMillis()
         val backgroundedFor =
             if (appBackgroundedAt > 0L) now - appBackgroundedAt else 0L
@@ -382,6 +388,13 @@ class MainActivity : AppCompatActivity() {
     override fun onStop() {
         if (running) {
             appBackgroundedAt = System.currentTimeMillis()
+            scannerGeneration += 1
+            scannerJob?.cancel()
+            scannerJob = null
+            startService(Intent(this, ScannerPlaybackService::class.java).apply {
+                action = ScannerPlaybackService.ACTION_BACKGROUND
+                putExtra(ScannerPlaybackService.EXTRA_FEED, selectedFeedSlug)
+            })
         }
         super.onStop()
     }
@@ -1900,11 +1913,11 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {
         }
 
-        runBlocking(Dispatchers.IO) {
-            sendListenerLeave()
+        if (!running) {
+            runBlocking(Dispatchers.IO) { sendListenerLeave() }
         }
 
-        if (controllerFuture.isDone) {
+        if (!running && controllerFuture.isDone) {
             try {
                 controllerFuture.get().stop()
                 controllerFuture.get().clearMediaItems()
