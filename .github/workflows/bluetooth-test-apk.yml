@@ -42,9 +42,3 @@ jobs:
           name: Scannerz-Bluetooth-Test-APK
           path: app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Build unsigned release AAB
-        run: gradle :app:bundleRelease --stacktrace
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Scannerz-Bluetooth-Test-Unsigned-AAB
-          path: app/build/outputs/bundle/release/app-release.aab
