@@ -10,6 +10,8 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.media.AudioAttributes as PlatformAudioAttributes
 import android.media.MediaPlayer
+import android.media.AudioManager
+import android.media.AudioDeviceInfo
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Bundle
@@ -708,6 +710,15 @@ class MainActivity : AppCompatActivity() {
         return legacyTgid.isNotBlank() && legacyTgid in blockedTalkgroups
     }
 
+    private fun isBluetoothMediaOutput(): Boolean {
+        val manager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        return manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
+            it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                it.type == AudioDeviceInfo.TYPE_BLE_SPEAKER
+        }
+    }
+
     private suspend fun playCallAndWait(call: JSONObject, generation: Long) {
         if (!running || generation != scannerGeneration || weatherInterrupting) return
 
@@ -742,6 +753,13 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.details).text = ""
         findViewById<TextView>(R.id.status).text = "Playing"
 
+        // The existing Bluetooth keepalive maintains a continuous audio path.
+        // Allow the car stereo 600 ms to open its audio gate before speech starts.
+        val bluetoothPadding = isBluetoothMediaOutput()
+        if (bluetoothPadding) {
+            delay(600)
+            if (!running || generation != scannerGeneration || weatherInterrupting) return
+        }
         controller.setMediaItem(MediaItem.fromUri(base + audioUrl))
         controller.prepare()
         controller.play()
@@ -776,6 +794,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (!running || generation != scannerGeneration || weatherInterrupting) return
+
+        // Leave the Bluetooth stream open after the recording finishes.
+        if (bluetoothPadding && !watchdogTriggered && controller.playerError == null &&
+            controller.playbackState == Player.STATE_ENDED) {
+            delay(600)
+            if (!running || generation != scannerGeneration || weatherInterrupting) return
+        }
 
         if (watchdogTriggered) {
             controller.stop()
