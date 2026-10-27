@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - bluetooth-compat-v1.0.1
+      - bluetooth-padding-v1.0.4
     paths:
       - 'app/**'
       - '.github/workflows/bluetooth-test-apk.yml'
@@ -39,6 +40,6 @@ jobs:
         run: gradle :app:assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: Scannerz-Bluetooth-Test-APK
+          name: Scannerz-v1.0.4-Bluetooth-Test-APK
           path: app/build/outputs/apk/debug/app-debug.apk
 
