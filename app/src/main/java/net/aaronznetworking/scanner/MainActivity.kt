@@ -858,7 +858,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        section.visibility = View.VISIBLE
+        // Announcements are accessible from the dedicated button; never force
+        // the panel open over the scanner display when updates arrive.
         textView.text = activeAnnouncements.joinToString("\n\n") {
             "${it.title}\n${it.message}"
         }
