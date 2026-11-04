@@ -12,18 +12,39 @@
         android:orientation="vertical"
         android:paddingLeft="18dp"
         android:paddingRight="18dp"
-        android:paddingTop="54dp"
+        android:paddingTop="34dp"
         android:paddingBottom="32dp">
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Scannerz Network"
+            android:text="SCANNERZ NETWORK"
             android:textColor="#6CFF88"
-            android:textSize="27sp"
+            android:textSize="28sp"
             android:textStyle="bold"
             android:fontFamily="monospace"
             android:gravity="center_horizontal" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="CREATED BY AARONZNETWORKING"
+            android:textColor="#8EBF98"
+            android:textSize="11sp"
+            android:fontFamily="monospace"
+            android:letterSpacing="0.12"
+            android:gravity="center_horizontal"
+            android:paddingTop="3dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="LIVE DIGITAL SCANNER  •  NETWORK RECEIVER"
+            android:textColor="#65FF82"
+            android:textSize="10sp"
+            android:fontFamily="monospace"
+            android:gravity="center_horizontal"
+            android:paddingTop="10dp" />
 
         <TextView
             android:id="@+id/status"
@@ -40,7 +61,7 @@
             android:id="@+id/startButton"
             android:layout_width="match_parent"
             android:layout_height="54dp"
-            android:text="START SCANNER"
+            android:text="▶  POWER / START SCANNER"
             android:textStyle="bold"
             android:textColor="#07110B"
             android:backgroundTint="#6CFF88"
@@ -50,7 +71,7 @@
             android:id="@+id/talkgroupButton"
             android:layout_width="match_parent"
             android:layout_height="50dp"
-            android:text="CHOOSE TALKGROUPS"
+            android:text="☷  BANKS / TALKGROUPS"
             android:textStyle="bold"
             android:textColor="#D8F7DE"
             android:backgroundTint="#173D20"
@@ -83,12 +104,12 @@
             android:orientation="vertical"
             android:padding="16dp"
             android:layout_marginTop="18dp"
-            android:background="#081F0E">
+            android:background="#102B17">
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="NOW PLAYING"
+                android:text="● LIVE MONITOR  /  ACTIVE TRANSMISSION"
                 android:textColor="#6CFF88"
                 android:textStyle="bold"
                 android:textSize="12sp"
@@ -98,9 +119,9 @@
                 android:id="@+id/nowPlaying"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Scanning…"
+                android:text="SCANNING…"
                 android:textColor="#E9FFF0"
-                android:textSize="20sp"
+                android:textSize="23sp"
                 android:textStyle="bold"
                 android:fontFamily="monospace"
                 android:paddingTop="8dp" />
