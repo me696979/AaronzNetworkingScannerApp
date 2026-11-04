@@ -1101,6 +1101,11 @@ class MainActivity : AppCompatActivity() {
                 updateStatsAndAlerts()
                 if (running) restartScannerAtLiveEdge("Feed changed — returning to live calls…")
             }
+        }.setNeutralButton("Refresh feeds") { _, _ ->
+            scope.launch {
+                loadFeeds()
+                showFeedDialog()
+            }
         }.setNegativeButton("Cancel", null).show()
     }
 
