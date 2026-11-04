@@ -379,7 +379,9 @@ class MainActivity : AppCompatActivity() {
             section.visibility = View.GONE
         }
 
+        var settingsPageRef: View? = null
         fun showLcdPage(sectionId: Int?) {
+            settingsPageRef?.visibility = View.GONE
             sections.forEach { findViewById<View>(it).visibility = View.GONE }
             if (sectionId == null) {
                 lcd.visibility = View.GONE
@@ -404,11 +406,49 @@ class MainActivity : AppCompatActivity() {
                 showLcdPage(if (opening) sectionId else null)
             }
         }
+        // Settings is an LCD page, not a modal dialog that covers the scanner.
+        val settingsPage = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(12, 12, 12, 12)
+            visibility = View.GONE
+        }
+        fun settingsLabel(message: String) = TextView(this).apply {
+            text = message
+            textSize = 14f
+            setTextColor(android.graphics.Color.rgb(172, 215, 180))
+            setPadding(0, 8, 0, 8)
+        }
+        settingsPage.addView(settingsLabel("SCANNER SETTINGS"))
+        val feedLabel = settingsLabel("")
+        settingsPage.addView(feedLabel)
+        settingsPage.addView(settingsLabel("Audio volume is controlled by the VOL buttons on the scanner."))
+        val talkgroupsShortcut = Button(this).apply {
+            text = "Choose talkgroups"
+            setOnClickListener { findViewById<Button>(R.id.talkgroupButton).performClick() }
+        }
+        settingsPage.addView(talkgroupsShortcut)
+        val weatherShortcut = Button(this).apply {
+            text = "Weather preferences"
+            setOnClickListener { showLcdPage(R.id.weatherSection) }
+        }
+        settingsPage.addView(weatherShortcut)
+        val alertsShortcut = Button(this).apply {
+            text = "Weather alerts"
+            setOnClickListener { showLcdPage(R.id.alertsSection) }
+        }
+        settingsPage.addView(alertsShortcut)
+        settingsPage.addView(settingsLabel("Scannerz Network 2.0.0 • Created by AaronzNetworking"))
+        lcd.addView(settingsPage)
+        settingsPageRef = settingsPage
         findViewById<Button>(R.id.settingsNav).setOnClickListener {
-            AlertDialog.Builder(this)
-                .setTitle("Scannerz Network Settings")
-                .setMessage("Talkgroup selection and weather preferences are available using the scanner controls.")
-                .setPositiveButton("OK", null).show()
+            val opening = settingsPage.visibility != View.VISIBLE
+            showLcdPage(null)
+            if (opening) {
+                feedLabel.text = "Current feed: " + selectedFeedSlug
+                live.visibility = View.GONE
+                lcd.visibility = View.VISIBLE
+                settingsPage.visibility = View.VISIBLE
+            }
         }
         // The existing start button retains its power/start/stop behavior.
         // A separate SCAN control restores the LCD without stopping audio.
