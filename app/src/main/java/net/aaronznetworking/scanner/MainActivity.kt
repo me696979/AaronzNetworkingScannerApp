@@ -401,16 +401,27 @@ class MainActivity : AppCompatActivity() {
         }
 
         var settingsPageRef: View? = null
+        val monitorHeader = findViewById<TextView>(R.id.lcdMonitorHeader)
+        val pageTitles = mapOf(
+            R.id.transcriptSection to "TRANSCRIPTS",
+            R.id.announcementSection to "ANNOUNCEMENTS",
+            R.id.recentCallsSection to "RECENT CALLS",
+            R.id.weatherSection to "LOCAL WEATHER",
+            R.id.alertsSection to "WEATHER ALERTS"
+        )
         fun showLcdPage(sectionId: Int?) {
             settingsPageRef?.visibility = View.GONE
             sections.forEach { findViewById<View>(it).visibility = View.GONE }
             if (sectionId == null) {
                 lcd.visibility = View.GONE
                 live.visibility = View.VISIBLE
+                monitorHeader.text = if (findViewById<TextView>(R.id.status).text.toString().contains("RECEIVING", ignoreCase = true))
+                    "● LIVE MONITOR  /  ACTIVE TRANSMISSION" else "● LIVE MONITOR  /  SCANNING"
             } else {
                 live.visibility = View.GONE
                 lcd.visibility = View.VISIBLE
                 findViewById<View>(sectionId).visibility = View.VISIBLE
+                monitorHeader.text = "● SCANNER MENU  /  " + (pageTitles[sectionId] ?: "MENU")
             }
         }
 
@@ -473,6 +484,7 @@ class MainActivity : AppCompatActivity() {
                 live.visibility = View.GONE
                 lcd.visibility = View.VISIBLE
                 settingsPage.visibility = View.VISIBLE
+                monitorHeader.text = "● SCANNER MENU  /  SETTINGS"
             }
         }
         // The existing start button retains its power/start/stop behavior.
@@ -1086,6 +1098,7 @@ class MainActivity : AppCompatActivity() {
                 loadTalkgroups()
                 updateAnnouncements()
                 updateWeather()
+                updateStatsAndAlerts()
                 if (running) restartScannerAtLiveEdge("Feed changed — returning to live calls…")
             }
         }.setNegativeButton("Cancel", null).show()
