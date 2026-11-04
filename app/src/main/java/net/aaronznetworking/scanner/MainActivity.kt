@@ -1896,6 +1896,8 @@ class MainActivity : AppCompatActivity() {
 
                 findViewById<TextView>(R.id.listeners).text =
                     "Listeners: ${stats.optInt("listeners")}     Peak: ${stats.optInt("peak")}\n$breakdown"
+                findViewById<TextView>(R.id.lcdListenerStats).text =
+                    "Listeners: ${stats.optInt("listeners")}   Scanners: $scanners   Peak: ${stats.optInt("peak")}"
             }
 
             val arr = alertsJson?.optJSONArray("alerts")
