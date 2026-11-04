@@ -376,6 +376,14 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.squelchDownButton).setOnClickListener { }
     }
 
+    // Background call updates must not overwrite the title of an open LCD menu.
+    private fun updateLiveMonitorHeader(active: Boolean) {
+        if (findViewById<View>(R.id.lcdLiveContent).visibility != View.VISIBLE) return
+        findViewById<TextView>(R.id.lcdMonitorHeader).text =
+            if (active) "● LIVE MONITOR  /  ACTIVE TRANSMISSION"
+            else "● LIVE MONITOR  /  SCANNING"
+    }
+
     private fun setupScannerDashboard() {
         // All informational pages use the same physical-scanner LCD, rather than
         // appearing as independent cards below the scanner controls.
@@ -472,7 +480,7 @@ class MainActivity : AppCompatActivity() {
             val opening = settingsPage.visibility != View.VISIBLE
             showLcdPage(null)
             if (opening) {
-                feedLabel.text = "Current feed: " + selectedFeedSlug
+                feedLabel.text = "Current feed: " + (feeds.firstOrNull { it.slug == selectedFeedSlug }?.name ?: selectedFeedSlug)
                 live.visibility = View.GONE
                 lcd.visibility = View.VISIBLE
                 settingsPage.visibility = View.VISIBLE
@@ -598,7 +606,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.startButton).text = "STOP SCANNER"
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
-        findViewById<TextView>(R.id.lcdMonitorHeader).text = "● LIVE MONITOR  /  SCANNING"
+        updateLiveMonitorHeader(false)
 
         scope.launch(Dispatchers.IO) {
             sendListenerHeartbeat()
@@ -636,7 +644,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.status).text = message
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
-        findViewById<TextView>(R.id.lcdMonitorHeader).text = "● LIVE MONITOR  /  SCANNING"
+        updateLiveMonitorHeader(false)
 
         scannerJob = scope.launch {
             scannerLoop(generation)
@@ -714,7 +722,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.status).text = "Stopped"
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
-        findViewById<TextView>(R.id.lcdMonitorHeader).text = "● LIVE MONITOR  /  SCANNING"
+        updateLiveMonitorHeader(false)
     }
 
     private suspend fun pollCalls(generation: Long) {
@@ -816,7 +824,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.nowPlaying).text = label.ifBlank { "TGID $tg" }
         findViewById<TextView>(R.id.details).text = "ACTIVE CALL  •  TGID $tg"
         findViewById<TextView>(R.id.status).text = "● RECEIVING TRANSMISSION"
-        findViewById<TextView>(R.id.lcdMonitorHeader).text = "● LIVE MONITOR  /  ACTIVE TRANSMISSION"
+        updateLiveMonitorHeader(true)
 
         // MediaSession exposes this metadata to Bluetooth displays and the
         // Android lock-screen media controls while a call is playing.
@@ -891,7 +899,7 @@ class MainActivity : AppCompatActivity() {
         addRecentCall(callId, label, tg)
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
-        findViewById<TextView>(R.id.lcdMonitorHeader).text = "● LIVE MONITOR  /  SCANNING"
+        updateLiveMonitorHeader(false)
     }
 
     private fun addRecentCall(id: String, label: String, tgid: String) {
@@ -1324,7 +1332,7 @@ class MainActivity : AppCompatActivity() {
             "NWS Weather Radio selected — joining weather audio…"
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
-        findViewById<TextView>(R.id.lcdMonitorHeader).text = "● LIVE MONITOR  /  SCANNING"
+        updateLiveMonitorHeader(false)
 
         val data = withContext(Dispatchers.IO) {
             getJson(
