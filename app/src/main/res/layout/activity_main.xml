@@ -57,64 +57,42 @@
             android:gravity="center_horizontal"
             android:paddingTop="10dp" />
 
-        <Button
-            android:id="@+id/startButton"
-            android:layout_width="match_parent"
-            android:layout_height="54dp"
-            android:text="▶  POWER / START SCANNER"
-            android:textStyle="bold"
-            android:textColor="#07110B"
-            android:backgroundTint="#6CFF88"
-            android:layout_marginTop="20dp" />
-
-        <Button
-            android:id="@+id/scanDisplayButton"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:text="▶  SCAN / RETURN TO LIVE LCD"
-            android:textStyle="bold"
-            android:textColor="#65FF82"
-            android:backgroundTint="#173D20"
-            android:layout_marginTop="8dp" />
-
-        <Button
-            android:id="@+id/talkgroupButton"
-            android:layout_width="match_parent"
-            android:layout_height="50dp"
-            android:text="☷  BANKS / TALKGROUPS"
-            android:textStyle="bold"
-            android:textColor="#D8F7DE"
-            android:backgroundTint="#173D20"
-            android:layout_marginTop="10dp" />
-
-        <Button
-            android:id="@+id/feedButton"
-            android:layout_width="match_parent"
-            android:layout_height="50dp"
-            android:text="FEED: LOADING…"
-            android:textStyle="bold"
-            android:textColor="#D8F7DE"
-            android:backgroundTint="#173D20"
-            android:layout_marginTop="10dp"
-            android:visibility="gone" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Choose exactly which agencies/talkgroups you want to hear. Your choices are saved on this device."
-            android:textColor="#7FAF8A"
-            android:textSize="12sp"
-            android:fontFamily="monospace"
-            android:gravity="center_horizontal"
-            android:paddingTop="6dp" />
+        <!-- Physical-scanner-inspired top: antenna, dual knobs and status strip -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="104dp"
+            android:gravity="bottom|center_horizontal" android:orientation="horizontal"
+            android:paddingBottom="4dp">
+            <TextView android:layout_width="34dp" android:layout_height="98dp"
+                android:background="#14271B" android:gravity="center"
+                android:text="│" android:textColor="#65FF82" android:textSize="55sp"
+                android:contentDescription="Decorative scanner antenna" />
+            <TextView android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="match_parent" android:gravity="bottom|center"
+                android:text="SCANNERZ\nNETWORK" android:textStyle="bold"
+                android:textColor="#65FF82" android:textSize="18sp"
+                android:fontFamily="monospace" />
+            <TextView android:layout_width="60dp" android:layout_height="55dp"
+                android:layout_marginEnd="8dp" android:gravity="center"
+                android:background="#25382B" android:text="VOL\n◉"
+                android:textColor="#D9FFE0" android:textSize="15sp"
+                android:contentDescription="Volume knob decoration" />
+            <TextView android:layout_width="60dp" android:layout_height="55dp"
+                android:gravity="center" android:background="#25382B"
+                android:text="SQL\n◉" android:textColor="#D9FFE0"
+                android:textSize="15sp" android:contentDescription="Squelch knob decoration" />
+        </LinearLayout>
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="◉  DIGITAL SCANNER  ·  LIVE RECEIVER"
+            android:gravity="center" android:textColor="#65FF82"
+            android:textSize="11sp" android:fontFamily="monospace"
+            android:padding="9dp" android:background="#152A1A" />
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:padding="16dp"
-            android:layout_marginTop="18dp"
-            android:background="#102B17">
+            android:layout_marginTop="8dp"
+            android:background="#173722">
 
             <TextView
                 android:layout_width="match_parent"
@@ -160,7 +138,67 @@
                 android:visibility="gone" />
         </LinearLayout>
 
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="SCANNERZ NETWORK  •  Created by AaronzNetworking" android:gravity="center" android:textColor="#65FF82" android:textSize="12sp" android:paddingTop="14dp" />
+        <Button
+            android:id="@+id/startButton"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:text="POWER / START"
+            android:textStyle="bold"
+            android:textColor="#07110B"
+            android:backgroundTint="#6CFF88"
+            android:layout_marginTop="20dp" />
+
+        <Button
+            android:id="@+id/scanDisplayButton"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="SCAN / LIVE"
+            android:textStyle="bold"
+            android:textColor="#65FF82"
+            android:backgroundTint="#173D20"
+            android:layout_marginTop="8dp" />
+
+        <Button
+            android:id="@+id/talkgroupButton"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:text="BANKS / TGIDS"
+            android:textStyle="bold"
+            android:textColor="#D8F7DE"
+            android:backgroundTint="#173D20"
+            android:layout_marginTop="10dp" />
+
+        <Button
+            android:id="@+id/feedButton"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:text="FEED: LOADING…"
+            android:textStyle="bold"
+            android:textColor="#D8F7DE"
+            android:backgroundTint="#173D20"
+            android:layout_marginTop="10dp"
+            android:visibility="gone" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Choose exactly which agencies/talkgroups you want to hear. Your choices are saved on this device."
+            android:textColor="#7FAF8A"
+            android:textSize="12sp"
+            android:fontFamily="monospace"
+            android:gravity="center_horizontal"
+            android:paddingTop="6dp" />
+
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="━━━━━━━━━━━━━━━━━━━━\n━━━━━━━━━━━━━━━━━━━━\n━━━━━━━━━━━━━━━━━━━━"
+            android:gravity="center" android:textColor="#324D38"
+            android:lineSpacingExtra="2dp" android:paddingTop="14dp"
+            android:paddingBottom="10dp" android:contentDescription="Decorative speaker grille" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="SCANNERZ NETWORK  •  Created by AaronzNetworking"
+            android:gravity="center" android:textColor="#65FF82"
+            android:textSize="12sp" android:paddingTop="8dp" />
+
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="10dp" android:layout_marginTop="12dp" android:background="#0B1C10">
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
                 <Button android:id="@+id/transcriptsNav" android:layout_width="0dp" android:layout_weight="1" android:layout_height="56dp" android:layout_margin="3dp" android:text="TRANSCRIPTS" android:textSize="12sp" android:textStyle="bold" android:textColor="#D9FFE0" android:backgroundTint="#173D20" />
