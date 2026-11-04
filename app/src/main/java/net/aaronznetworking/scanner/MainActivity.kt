@@ -341,11 +341,33 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupScannerDashboard() {
+        // All informational pages use the same physical-scanner LCD, rather than
+        // appearing as independent cards below the scanner controls.
+        val lcd = findViewById<LinearLayout>(R.id.lcdPageContainer)
+        val live = findViewById<View>(R.id.lcdLiveContent)
         val sections = listOf(
             R.id.transcriptSection, R.id.announcementSection,
             R.id.recentCallsSection, R.id.weatherSection, R.id.alertsSection
         )
-        sections.forEach { findViewById<View>(it).visibility = View.GONE }
+        sections.forEach { sectionId ->
+            val section = findViewById<View>(sectionId)
+            (section.parent as? android.view.ViewGroup)?.removeView(section)
+            lcd.addView(section)
+            section.visibility = View.GONE
+        }
+
+        fun showLcdPage(sectionId: Int?) {
+            sections.forEach { findViewById<View>(it).visibility = View.GONE }
+            if (sectionId == null) {
+                lcd.visibility = View.GONE
+                live.visibility = View.VISIBLE
+            } else {
+                live.visibility = View.GONE
+                lcd.visibility = View.VISIBLE
+                findViewById<View>(sectionId).visibility = View.VISIBLE
+            }
+        }
+
         val buttons = listOf(
             R.id.transcriptsNav to R.id.transcriptSection,
             R.id.announcementsNav to R.id.announcementSection,
@@ -355,22 +377,20 @@ class MainActivity : AppCompatActivity() {
         )
         buttons.forEach { (buttonId, sectionId) ->
             findViewById<Button>(buttonId).setOnClickListener {
-                val section = findViewById<View>(sectionId)
-                val opening = section.visibility != View.VISIBLE
-                sections.forEach { findViewById<View>(it).visibility = View.GONE }
-                section.visibility = if (opening) View.VISIBLE else View.GONE
-                if (opening) {
-                    (section.parent?.parent as? android.widget.ScrollView)?.post {
-                        section.requestFocus()
-                    }
-                }
+                val opening = findViewById<View>(sectionId).visibility != View.VISIBLE
+                showLcdPage(if (opening) sectionId else null)
             }
         }
         findViewById<Button>(R.id.settingsNav).setOnClickListener {
             AlertDialog.Builder(this)
                 .setTitle("Scannerz Network Settings")
-                .setMessage("Talkgroup selection, weather preferences and audio controls remain available through their scanner buttons. More settings will be added here.")
+                .setMessage("Talkgroup selection and weather preferences are available using the scanner controls.")
                 .setPositiveButton("OK", null).show()
+        }
+        // The existing start button retains its power/start/stop behavior.
+        // A separate SCAN control restores the LCD without stopping audio.
+        findViewById<Button>(R.id.scanDisplayButton).setOnClickListener {
+            showLcdPage(null)
         }
     }
 
