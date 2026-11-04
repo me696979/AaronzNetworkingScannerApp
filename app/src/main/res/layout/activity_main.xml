@@ -68,6 +68,16 @@
             android:layout_marginTop="20dp" />
 
         <Button
+            android:id="@+id/scanDisplayButton"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="▶  SCAN / RETURN TO LIVE LCD"
+            android:textStyle="bold"
+            android:textColor="#65FF82"
+            android:backgroundTint="#173D20"
+            android:layout_marginTop="8dp" />
+
+        <Button
             android:id="@+id/talkgroupButton"
             android:layout_width="match_parent"
             android:layout_height="50dp"
