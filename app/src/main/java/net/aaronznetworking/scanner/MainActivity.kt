@@ -780,10 +780,10 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Compact one-line app display: TGID + database/SDRTrunk-resolved name only.
-        findViewById<TextView>(R.id.nowPlaying).text = "TGID $tg • $label"
-        findViewById<TextView>(R.id.details).text = ""
-        findViewById<TextView>(R.id.status).text = "Playing"
+        // Display real transmission metadata without changing playback timing.
+        findViewById<TextView>(R.id.nowPlaying).text = label.ifBlank { "TGID $tg" }
+        findViewById<TextView>(R.id.details).text = "ACTIVE CALL  •  TGID $tg"
+        findViewById<TextView>(R.id.status).text = "● RECEIVING TRANSMISSION"
 
         controller.setMediaItem(MediaItem.fromUri(base + audioUrl))
         controller.prepare()
