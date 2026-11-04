@@ -219,15 +219,9 @@ class MainActivity : AppCompatActivity() {
                                 val interruptedFor = System.currentTimeMillis() - audioFocusLostAt
                                 audioFocusLostAt = 0L
 
-                                // Very short notification tones do not reset the scanner.
-                                // Longer phone/media interruptions return to the live edge.
-                                if (interruptedFor >= 2500) {
-                                    scope.launch {
-                                        restartScannerAtLiveEdge(
-                                            "Audio interruption ended — returning to live calls…"
-                                        )
-                                    }
-                                }
+                                // Do not discard the active call when audio focus returns.
+                                // The Media3 player handles pause/resume for transient focus changes.
+
                             }
                         }
                     })
@@ -278,6 +272,7 @@ class MainActivity : AppCompatActivity() {
         renderRecentCalls()
         renderAnnouncements()
         updateTalkgroupButton()
+        setupScannerDashboard()
 
         try {
             connectivityManager.registerDefaultNetworkCallback(networkCallback)
@@ -333,48 +328,9 @@ class MainActivity : AppCompatActivity() {
             loadTalkgroups()
         }
 
-        val now = System.currentTimeMillis()
-        val backgroundedFor =
-            if (appBackgroundedAt > 0L) now - appBackgroundedAt else 0L
-
-        /*
-         * Android may suspend the Activity's scanner loop while the app is in
-         * the background. If we return after a meaningful background period,
-         * discard the old cursor and rejoin the server's current live edge.
-         *
-         * IMPORTANT: ordinary radio silence does NOT trigger this. The scanner
-         * can sit idle for hours and still play the very next live call.
-         */
-        if (
-            running &&
-            backgroundedFor >= 15000L &&
-            !weatherInterrupting &&
-            !manualNwsActive
-        ) {
-            appBackgroundedAt = 0L
-            audioFocusLostAt = 0L
-            scope.launch {
-                restartScannerAtLiveEdge(
-                    "App resumed — returning to live calls…"
-                )
-            }
-            return
-        }
-
+        // Rebinding the Activity must never stop a transmission.
+        // Scanner recovery is driven by actual stream/network failures, not screen unlock.
         appBackgroundedAt = 0L
-
-        if (
-            running &&
-            audioFocusLostAt > 0 &&
-            now - audioFocusLostAt >= 2500 &&
-            !weatherInterrupting &&
-            !manualNwsActive
-        ) {
-            audioFocusLostAt = 0L
-            scope.launch {
-                restartScannerAtLiveEdge("Returning to live calls…")
-            }
-        }
     }
 
     override fun onStop() {
@@ -382,6 +338,40 @@ class MainActivity : AppCompatActivity() {
             appBackgroundedAt = System.currentTimeMillis()
         }
         super.onStop()
+    }
+
+    private fun setupScannerDashboard() {
+        val sections = listOf(
+            R.id.transcriptSection, R.id.announcementSection,
+            R.id.recentCallsSection, R.id.weatherSection, R.id.alertsSection
+        )
+        sections.forEach { findViewById<View>(it).visibility = View.GONE }
+        val buttons = listOf(
+            R.id.transcriptsNav to R.id.transcriptSection,
+            R.id.announcementsNav to R.id.announcementSection,
+            R.id.recentCallsNav to R.id.recentCallsSection,
+            R.id.weatherNav to R.id.weatherSection,
+            R.id.alertsNav to R.id.alertsSection
+        )
+        buttons.forEach { (buttonId, sectionId) ->
+            findViewById<Button>(buttonId).setOnClickListener {
+                val section = findViewById<View>(sectionId)
+                val opening = section.visibility != View.VISIBLE
+                sections.forEach { findViewById<View>(it).visibility = View.GONE }
+                section.visibility = if (opening) View.VISIBLE else View.GONE
+                if (opening) {
+                    (section.parent?.parent as? android.widget.ScrollView)?.post {
+                        section.requestFocus()
+                    }
+                }
+            }
+        }
+        findViewById<Button>(R.id.settingsNav).setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Scannerz Network Settings")
+                .setMessage("Talkgroup selection, weather preferences and audio controls remain available through their scanner buttons. More settings will be added here.")
+                .setPositiveButton("OK", null).show()
+        }
     }
 
     private fun startLiveEvents() {
