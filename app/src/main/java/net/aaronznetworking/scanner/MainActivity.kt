@@ -913,8 +913,8 @@ class MainActivity : AppCompatActivity() {
             ?: feeds.firstOrNull { it.slug == saved }
             ?: feeds.first()
         applySelectedFeed(selected)
-        findViewById<Button>(R.id.feedButton).visibility =
-            if (feeds.size > 1) View.VISIBLE else View.GONE
+        // Keep feed discovery visible even when only the home feed is registered.
+        findViewById<Button>(R.id.feedButton).visibility = View.VISIBLE
         return true
     }
 
@@ -927,7 +927,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showFeedDialog() {
-        if (feeds.size <= 1) return
+        if (feeds.size <= 1) {
+            AlertDialog.Builder(this)
+                .setTitle("Scannerz Network Feeds")
+                .setMessage("Your home scanner feed is currently the only available feed. More feeds will appear here as they are added to Scannerz Network.")
+                .setPositiveButton("Refresh") { _, _ -> scope.launch { loadFeeds() } }
+                .setNegativeButton("Close", null)
+                .show()
+            return
+        }
         val labels = feeds.map { if (it.location.isBlank()) it.name else "${it.name} • ${it.location}" }.toTypedArray()
         val checked = feeds.indexOfFirst { it.slug == selectedFeedSlug }
         AlertDialog.Builder(this).setTitle("Select Scanner Feed").setSingleChoiceItems(labels, checked) { dialog, which ->
