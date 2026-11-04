@@ -371,17 +371,9 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.volumeDownButton).setOnClickListener {
             audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
         }
-        // Internet streams do not expose RF signal strength or hardware squelch.
-        // Do not pretend these buttons can adjust a receiver's RF squelch.
-        val explainSquelch = View.OnClickListener {
-            AlertDialog.Builder(this)
-                .setTitle("Digital squelch")
-                .setMessage("RF squelch is not available for this internet audio feed. These controls will be enabled when a real audio-gating setting is implemented.")
-                .setPositiveButton("OK", null)
-                .show()
-        }
-        findViewById<Button>(R.id.squelchUpButton).setOnClickListener(explainSquelch)
-        findViewById<Button>(R.id.squelchDownButton).setOnClickListener(explainSquelch)
+        // SQL is decorative on this streaming receiver: no RF squelch to adjust.
+        findViewById<Button>(R.id.squelchUpButton).setOnClickListener { }
+        findViewById<Button>(R.id.squelchDownButton).setOnClickListener { }
     }
 
     private fun setupScannerDashboard() {
