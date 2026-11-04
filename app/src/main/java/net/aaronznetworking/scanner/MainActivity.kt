@@ -164,22 +164,41 @@ class MainActivity : AppCompatActivity() {
         getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     }
 
+    // The default-network callback can report Wi-Fi/cellular handoffs without an
+    // intervening onLost. Debounce handoffs so rapid changes do not restart twice.
+    private var lastDefaultNetwork: Network? = null
+    private var networkRecoveryJob: Job? = null
+
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onLost(network: Network) {
-            if (running) {
+            runOnUiThread {
+                if (!running) return@runOnUiThread
+                // Losing the old Wi-Fi network after cellular is already default
+                // must not interrupt an otherwise healthy stream.
+                if (connectivityManager.activeNetwork != null) return@runOnUiThread
                 networkInterrupted = true
-                runOnUiThread {
-                    findViewById<TextView>(R.id.status).text =
-                        "Network interrupted — waiting to reconnect…"
-                }
+                findViewById<TextView>(R.id.status).text =
+                    "Network interrupted — waiting to reconnect…"
             }
         }
 
         override fun onAvailable(network: Network) {
-            if (running && networkInterrupted && !weatherInterrupting) {
-                networkInterrupted = false
-                scope.launch {
-                    restartScannerAtLiveEdge("Network restored — returning to live calls…")
+            runOnUiThread {
+                val previous = lastDefaultNetwork
+                lastDefaultNetwork = network
+                if (!running || weatherInterrupting) return@runOnUiThread
+                val shouldRecover = networkInterrupted ||
+                    (previous != null && previous != network)
+                if (!shouldRecover) return@runOnUiThread
+                networkRecoveryJob?.cancel()
+                networkRecoveryJob = scope.launch {
+                    delay(800)
+                    if (!running || weatherInterrupting ||
+                        connectivityManager.activeNetwork != network) return@launch
+                    networkInterrupted = false
+                    restartScannerAtLiveEdge(
+                        "Network changed — returning to live calls…"
+                    )
                 }
             }
         }
