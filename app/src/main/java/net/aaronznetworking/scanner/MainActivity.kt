@@ -421,6 +421,10 @@ class MainActivity : AppCompatActivity() {
         settingsPage.addView(settingsLabel("SCANNER SETTINGS"))
         val feedLabel = settingsLabel("")
         settingsPage.addView(feedLabel)
+        settingsPage.addView(Button(this).apply {
+            text = "Choose scanner feed"
+            setOnClickListener { showFeedDialog() }
+        })
         settingsPage.addView(settingsLabel("Audio volume is controlled by the VOL buttons on the scanner."))
         val talkgroupsShortcut = Button(this).apply {
             text = "Choose talkgroups"
