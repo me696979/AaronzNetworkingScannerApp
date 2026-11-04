@@ -93,7 +93,6 @@
                 android:textSize="13sp"
                 android:fontFamily="monospace"
                 android:paddingTop="6dp" />
-            </LinearLayout>
 
             <TextView android:id="@+id/lcdListenerStats"
                 android:layout_width="match_parent"
@@ -103,6 +102,7 @@
                 android:textSize="12sp"
                 android:fontFamily="monospace"
                 android:paddingTop="8dp" />
+            </LinearLayout>
 
             <LinearLayout
                 android:id="@+id/lcdPageContainer"
