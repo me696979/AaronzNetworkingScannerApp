@@ -28,6 +28,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -809,7 +810,19 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.details).text = "ACTIVE CALL  •  TGID $tg"
         findViewById<TextView>(R.id.status).text = "● RECEIVING TRANSMISSION"
 
-        controller.setMediaItem(MediaItem.fromUri(base + audioUrl))
+        // MediaSession exposes this metadata to Bluetooth displays and the
+        // Android lock-screen media controls while a call is playing.
+        val callTitle = label.ifBlank { "TGID $tg" }
+        val metadata = MediaMetadata.Builder()
+            .setTitle(callTitle)
+            .setArtist("Scannerz Network")
+            .setAlbumTitle("Live scanner • TGID $tg")
+            .build()
+        val mediaItem = MediaItem.Builder()
+            .setUri(base + audioUrl)
+            .setMediaMetadata(metadata)
+            .build()
+        controller.setMediaItem(mediaItem)
         controller.prepare()
         controller.play()
 
