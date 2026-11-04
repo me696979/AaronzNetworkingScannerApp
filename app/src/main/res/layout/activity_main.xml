@@ -141,7 +141,11 @@
         <!-- Scanner face: real navigation buttons, preserved IDs and listeners -->
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="horizontal" android:layout_marginTop="10dp" android:gravity="center_vertical">
-            <LinearLayout android:layout_width="47dp" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center" android:background="#17391E"><TextView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:text="▲" android:gravity="center" android:textColor="#65FF82" android:textSize="20sp" /><TextView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:text="VOL" android:gravity="center" android:textColor="#FFFFFF" android:textStyle="bold" android:textSize="12sp" /><TextView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:text="▼" android:gravity="center" android:textColor="#65FF82" android:textSize="20sp" /></LinearLayout>
+            <LinearLayout android:layout_width="48dp" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center" android:background="#17391E">
+                <Button android:id="@+id/volumeUpButton" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:text="▲" android:textSize="18sp" android:textColor="#65FF82" android:backgroundTint="#17391E" android:contentDescription="Increase VOL" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="VOL" android:gravity="center" android:textColor="#FFFFFF" android:textStyle="bold" android:textSize="12sp" />
+                <Button android:id="@+id/volumeDownButton" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:text="▼" android:textSize="18sp" android:textColor="#65FF82" android:backgroundTint="#17391E" android:contentDescription="Decrease VOL" />
+            </LinearLayout>
             <LinearLayout android:layout_width="0dp" android:layout_weight="1"
                 android:layout_height="wrap_content" android:orientation="vertical">
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
@@ -162,7 +166,11 @@
                     <Button android:id="@+id/settingsNav" android:layout_width="0dp" android:layout_weight="1" android:layout_height="70dp" android:layout_margin="3dp" android:minHeight="54dp" android:text="Settings" android:textAllCaps="false" android:textSize="12sp" android:textStyle="bold" android:textColor="#D9FFE0" android:backgroundTint="#13391C" />
                 </LinearLayout>
             </LinearLayout>
-            <LinearLayout android:layout_width="47dp" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center" android:background="#17391E"><TextView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:text="▲" android:gravity="center" android:textColor="#65FF82" android:textSize="20sp" /><TextView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:text="SQL" android:gravity="center" android:textColor="#FFFFFF" android:textStyle="bold" android:textSize="12sp" /><TextView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:text="▼" android:gravity="center" android:textColor="#65FF82" android:textSize="20sp" /></LinearLayout>
+            <LinearLayout android:layout_width="48dp" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center" android:background="#17391E">
+                <Button android:id="@+id/squelchUpButton" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:text="▲" android:textSize="18sp" android:textColor="#65FF82" android:backgroundTint="#17391E" android:contentDescription="Increase SQL" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="SQL" android:gravity="center" android:textColor="#FFFFFF" android:textStyle="bold" android:textSize="12sp" />
+                <Button android:id="@+id/squelchDownButton" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:text="▼" android:textSize="18sp" android:textColor="#65FF82" android:backgroundTint="#17391E" android:contentDescription="Decrease SQL" />
+            </LinearLayout>
         </LinearLayout>
         <Button android:id="@+id/feedButton" android:layout_width="match_parent"
             android:layout_height="48dp" android:text="FEED: LOADING…" android:textColor="#D9FFE0"
