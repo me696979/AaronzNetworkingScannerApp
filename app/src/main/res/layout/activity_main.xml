@@ -10,15 +10,15 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:paddingLeft="18dp"
-        android:paddingRight="18dp"
-        android:paddingTop="34dp"
-        android:paddingBottom="32dp">
+        android:paddingLeft="7dp"
+        android:paddingRight="7dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp">
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="SCANNERZ NETWORK"
+            android:text="Scannerz Network"
             android:textColor="#6CFF88"
             android:textSize="28sp"
             android:textStyle="bold"
@@ -81,7 +81,7 @@
                 android:textSize="15sp" android:contentDescription="Squelch knob decoration" />
         </LinearLayout>
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="◉  DIGITAL SCANNER  ·  LIVE RECEIVER"
+            android:text="● LIVE      Scannerz Network      ● LISTENING"
             android:gravity="center" android:textColor="#65FF82"
             android:textSize="11sp" android:fontFamily="monospace"
             android:padding="9dp" android:background="#152A1A" />
@@ -92,7 +92,7 @@
             android:orientation="vertical"
             android:padding="16dp"
             android:layout_marginTop="8dp"
-            android:background="#173722">
+            android:background="#061E0B">
 
             <TextView
                 android:layout_width="match_parent"
@@ -108,7 +108,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="SCANNING…"
-                android:textColor="#E9FFF0"
+                android:textColor="#65FF82"
                 android:textSize="23sp"
                 android:textStyle="bold"
                 android:fontFamily="monospace"
@@ -138,82 +138,44 @@
                 android:visibility="gone" />
         </LinearLayout>
 
-        <Button
-            android:id="@+id/startButton"
-            android:layout_width="match_parent"
-            android:layout_height="54dp"
-            android:text="POWER / START"
-            android:textStyle="bold"
-            android:textColor="#07110B"
-            android:backgroundTint="#6CFF88"
-            android:layout_marginTop="20dp" />
-
-        <Button
-            android:id="@+id/scanDisplayButton"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:text="SCAN / LIVE"
-            android:textStyle="bold"
-            android:textColor="#65FF82"
-            android:backgroundTint="#173D20"
-            android:layout_marginTop="8dp" />
-
-        <Button
-            android:id="@+id/talkgroupButton"
-            android:layout_width="match_parent"
-            android:layout_height="50dp"
-            android:text="BANKS / TGIDS"
-            android:textStyle="bold"
-            android:textColor="#D8F7DE"
-            android:backgroundTint="#173D20"
-            android:layout_marginTop="10dp" />
-
-        <Button
-            android:id="@+id/feedButton"
-            android:layout_width="match_parent"
-            android:layout_height="50dp"
-            android:text="FEED: LOADING…"
-            android:textStyle="bold"
-            android:textColor="#D8F7DE"
-            android:backgroundTint="#173D20"
-            android:layout_marginTop="10dp"
-            android:visibility="gone" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Choose exactly which agencies/talkgroups you want to hear. Your choices are saved on this device."
-            android:textColor="#7FAF8A"
-            android:textSize="12sp"
-            android:fontFamily="monospace"
-            android:gravity="center_horizontal"
-            android:paddingTop="6dp" />
-
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="━━━━━━━━━━━━━━━━━━━━\n━━━━━━━━━━━━━━━━━━━━\n━━━━━━━━━━━━━━━━━━━━"
-            android:gravity="center" android:textColor="#324D38"
-            android:lineSpacingExtra="2dp" android:paddingTop="14dp"
-            android:paddingBottom="10dp" android:contentDescription="Decorative speaker grille" />
-        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="SCANNERZ NETWORK  •  Created by AaronzNetworking"
-            android:gravity="center" android:textColor="#65FF82"
-            android:textSize="12sp" android:paddingTop="8dp" />
-
-        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="10dp" android:layout_marginTop="12dp" android:background="#0B1C10">
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
-                <Button android:id="@+id/transcriptsNav" android:layout_width="0dp" android:layout_weight="1" android:layout_height="56dp" android:layout_margin="3dp" android:text="TRANSCRIPTS" android:textSize="12sp" android:textStyle="bold" android:textColor="#D9FFE0" android:backgroundTint="#173D20" />
-                <Button android:id="@+id/announcementsNav" android:layout_width="0dp" android:layout_weight="1" android:layout_height="56dp" android:layout_margin="3dp" android:text="ANNOUNCEMENTS" android:textSize="12sp" android:textStyle="bold" android:textColor="#D9FFE0" android:backgroundTint="#173D20" />
+        <!-- Scanner face: real navigation buttons, preserved IDs and listeners -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layout_marginTop="10dp" android:gravity="center_vertical">
+            <LinearLayout android:layout_width="47dp" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center" android:background="#17391E"><TextView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:text="▲" android:gravity="center" android:textColor="#65FF82" android:textSize="20sp" /><TextView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:text="VOL" android:gravity="center" android:textColor="#FFFFFF" android:textStyle="bold" android:textSize="12sp" /><TextView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:text="▼" android:gravity="center" android:textColor="#65FF82" android:textSize="20sp" /></LinearLayout>
+            <LinearLayout android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content" android:orientation="vertical">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                    <Button android:id="@+id/startButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="70dp" android:layout_margin="3dp" android:minHeight="54dp" android:text="⏻  Power" android:textAllCaps="false" android:textSize="12sp" android:textStyle="bold" android:textColor="#D9FFE0" android:backgroundTint="#13391C" />
+                    <Button android:id="@+id/scanDisplayButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="70dp" android:layout_margin="3dp" android:minHeight="54dp" android:text="▶  Scan" android:textAllCaps="false" android:textSize="12sp" android:textStyle="bold" android:textColor="#D9FFE0" android:backgroundTint="#13391C" />
+                    <Button android:id="@+id/talkgroupButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="70dp" android:layout_margin="3dp" android:minHeight="54dp" android:text="☷  TGIDs" android:textAllCaps="false" android:textSize="12sp" android:textStyle="bold" android:textColor="#D9FFE0" android:backgroundTint="#13391C" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                    <Button android:id="@+id/transcriptsNav" android:layout_width="0dp" android:layout_weight="1" android:layout_height="70dp" android:layout_margin="3dp" android:minHeight="54dp" android:text="Transcripts" android:textAllCaps="false" android:textSize="12sp" android:textStyle="bold" android:textColor="#D9FFE0" android:backgroundTint="#13391C" />
+                    <Button android:id="@+id/announcementsNav" android:layout_width="0dp" android:layout_weight="1" android:layout_height="70dp" android:layout_margin="3dp" android:minHeight="54dp" android:text="Announcements" android:textAllCaps="false" android:textSize="12sp" android:textStyle="bold" android:textColor="#D9FFE0" android:backgroundTint="#13391C" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                    <Button android:id="@+id/recentCallsNav" android:layout_width="0dp" android:layout_weight="1" android:layout_height="70dp" android:layout_margin="3dp" android:minHeight="54dp" android:text="Recent Calls" android:textAllCaps="false" android:textSize="12sp" android:textStyle="bold" android:textColor="#D9FFE0" android:backgroundTint="#13391C" />
+                    <Button android:id="@+id/weatherNav" android:layout_width="0dp" android:layout_weight="1" android:layout_height="70dp" android:layout_margin="3dp" android:minHeight="54dp" android:text="Weather" android:textAllCaps="false" android:textSize="12sp" android:textStyle="bold" android:textColor="#D9FFE0" android:backgroundTint="#13391C" />
+                </LinearLayout>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                    <Button android:id="@+id/alertsNav" android:layout_width="0dp" android:layout_weight="1" android:layout_height="70dp" android:layout_margin="3dp" android:minHeight="54dp" android:text="Alerts" android:textAllCaps="false" android:textSize="12sp" android:textStyle="bold" android:textColor="#D9FFE0" android:backgroundTint="#13391C" />
+                    <Button android:id="@+id/settingsNav" android:layout_width="0dp" android:layout_weight="1" android:layout_height="70dp" android:layout_margin="3dp" android:minHeight="54dp" android:text="Settings" android:textAllCaps="false" android:textSize="12sp" android:textStyle="bold" android:textColor="#D9FFE0" android:backgroundTint="#13391C" />
+                </LinearLayout>
             </LinearLayout>
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
-                <Button android:id="@+id/recentCallsNav" android:layout_width="0dp" android:layout_weight="1" android:layout_height="56dp" android:layout_margin="3dp" android:text="RECENT CALLS" android:textSize="12sp" android:textStyle="bold" android:textColor="#D9FFE0" android:backgroundTint="#173D20" />
-                <Button android:id="@+id/weatherNav" android:layout_width="0dp" android:layout_weight="1" android:layout_height="56dp" android:layout_margin="3dp" android:text="WEATHER" android:textSize="12sp" android:textStyle="bold" android:textColor="#D9FFE0" android:backgroundTint="#173D20" />
-            </LinearLayout>
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
-                <Button android:id="@+id/alertsNav" android:layout_width="0dp" android:layout_weight="1" android:layout_height="56dp" android:layout_margin="3dp" android:text="ALERTS" android:textSize="12sp" android:textStyle="bold" android:textColor="#D9FFE0" android:backgroundTint="#173D20" />
-                <Button android:id="@+id/settingsNav" android:layout_width="0dp" android:layout_weight="1" android:layout_height="56dp" android:layout_margin="3dp" android:text="SETTINGS" android:textSize="12sp" android:textStyle="bold" android:textColor="#D9FFE0" android:backgroundTint="#173D20" />
-            </LinearLayout>
+            <LinearLayout android:layout_width="47dp" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center" android:background="#17391E"><TextView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:text="▲" android:gravity="center" android:textColor="#65FF82" android:textSize="20sp" /><TextView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:text="SQL" android:gravity="center" android:textColor="#FFFFFF" android:textStyle="bold" android:textSize="12sp" /><TextView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:text="▼" android:gravity="center" android:textColor="#65FF82" android:textSize="20sp" /></LinearLayout>
         </LinearLayout>
-
+        <Button android:id="@+id/feedButton" android:layout_width="match_parent"
+            android:layout_height="48dp" android:text="FEED: LOADING…" android:textColor="#D9FFE0"
+            android:backgroundTint="#173D20" android:visibility="gone" />
+        <TextView android:layout_width="match_parent" android:layout_height="100dp"
+            android:gravity="center" android:text="● ● ● ● ● ● ● ● ● ● ● ● ● ● ●\n● ● ● ● ● ● ● ● ● ● ● ● ● ● ●\n● ● ● ● ● ● ● ● ● ● ● ● ● ● ●"
+            android:textSize="18sp" android:letterSpacing="0.12" android:textColor="#39543E"
+            android:background="#101713" android:layout_marginTop="10dp"
+            android:contentDescription="Scanner speaker grille" />
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="◉ Connected     |     Scannerz Network     |     v2.0.0"
+            android:gravity="center" android:padding="10dp" android:textSize="12sp"
+            android:textColor="#65FF82" android:background="#102A16" />
         <LinearLayout
             android:id="@+id/weatherSection"
             android:layout_width="match_parent"
