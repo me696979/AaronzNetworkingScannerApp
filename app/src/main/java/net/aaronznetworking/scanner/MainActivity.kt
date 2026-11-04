@@ -594,6 +594,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.startButton).text = "STOP SCANNER"
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
+        findViewById<TextView>(R.id.lcdMonitorHeader).text = "● LIVE MONITOR  /  SCANNING"
 
         scope.launch(Dispatchers.IO) {
             sendListenerHeartbeat()
@@ -631,6 +632,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.status).text = message
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
+        findViewById<TextView>(R.id.lcdMonitorHeader).text = "● LIVE MONITOR  /  SCANNING"
 
         scannerJob = scope.launch {
             scannerLoop(generation)
@@ -708,6 +710,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.status).text = "Stopped"
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
+        findViewById<TextView>(R.id.lcdMonitorHeader).text = "● LIVE MONITOR  /  SCANNING"
     }
 
     private suspend fun pollCalls(generation: Long) {
@@ -809,6 +812,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.nowPlaying).text = label.ifBlank { "TGID $tg" }
         findViewById<TextView>(R.id.details).text = "ACTIVE CALL  •  TGID $tg"
         findViewById<TextView>(R.id.status).text = "● RECEIVING TRANSMISSION"
+        findViewById<TextView>(R.id.lcdMonitorHeader).text = "● LIVE MONITOR  /  ACTIVE TRANSMISSION"
 
         // MediaSession exposes this metadata to Bluetooth displays and the
         // Android lock-screen media controls while a call is playing.
@@ -883,6 +887,7 @@ class MainActivity : AppCompatActivity() {
         addRecentCall(callId, label, tg)
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
+        findViewById<TextView>(R.id.lcdMonitorHeader).text = "● LIVE MONITOR  /  SCANNING"
     }
 
     private fun addRecentCall(id: String, label: String, tgid: String) {
@@ -1314,6 +1319,7 @@ class MainActivity : AppCompatActivity() {
             "NWS Weather Radio selected — joining weather audio…"
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
+        findViewById<TextView>(R.id.lcdMonitorHeader).text = "● LIVE MONITOR  /  SCANNING"
 
         val data = withContext(Dispatchers.IO) {
             getJson(
