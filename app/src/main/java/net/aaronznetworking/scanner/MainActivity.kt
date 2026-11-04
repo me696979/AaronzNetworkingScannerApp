@@ -264,6 +264,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.feedButton).setOnClickListener { showFeedDialog() }
+        findViewById<Button>(R.id.feedQuickNav).setOnClickListener { showFeedDialog() }
 
         loadSavedBlockedTalkgroups()
         setupCollapsibleSections()
