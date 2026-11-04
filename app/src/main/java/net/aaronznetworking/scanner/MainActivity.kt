@@ -9,6 +9,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.media.AudioAttributes as PlatformAudioAttributes
 import android.media.MediaPlayer
+import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Bundle
@@ -273,6 +274,7 @@ class MainActivity : AppCompatActivity() {
         renderAnnouncements()
         updateTalkgroupButton()
         setupScannerDashboard()
+        setupScannerSideControls()
 
         try {
             connectivityManager.registerDefaultNetworkCallback(networkCallback)
@@ -338,6 +340,27 @@ class MainActivity : AppCompatActivity() {
             appBackgroundedAt = System.currentTimeMillis()
         }
         super.onStop()
+    }
+
+    private fun setupScannerSideControls() {
+        val audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        findViewById<Button>(R.id.volumeUpButton).setOnClickListener {
+            audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
+        }
+        findViewById<Button>(R.id.volumeDownButton).setOnClickListener {
+            audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
+        }
+        // Internet streams do not expose RF signal strength or hardware squelch.
+        // Do not pretend these buttons can adjust a receiver's RF squelch.
+        val explainSquelch = View.OnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Digital squelch")
+                .setMessage("RF squelch is not available for this internet audio feed. These controls will be enabled when a real audio-gating setting is implemented.")
+                .setPositiveButton("OK", null)
+                .show()
+        }
+        findViewById<Button>(R.id.squelchUpButton).setOnClickListener(explainSquelch)
+        findViewById<Button>(R.id.squelchDownButton).setOnClickListener(explainSquelch)
     }
 
     private fun setupScannerDashboard() {
