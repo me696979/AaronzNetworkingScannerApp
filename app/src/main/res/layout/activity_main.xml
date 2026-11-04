@@ -62,6 +62,12 @@
                 android:textSize="12sp"
                 android:fontFamily="monospace" />
 
+            <LinearLayout
+                android:id="@+id/lcdLiveContent"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
             <TextView android:id="@+id/status"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:text="Ready" android:textColor="#8EBF98"
@@ -78,12 +84,6 @@
                 android:textStyle="bold"
                 android:fontFamily="monospace"
                 android:paddingTop="8dp" />
-
-            <LinearLayout
-                android:id="@+id/lcdLiveContent"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical">
 
             <TextView
                 android:id="@+id/details"
