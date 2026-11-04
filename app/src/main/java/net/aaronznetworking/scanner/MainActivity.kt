@@ -825,6 +825,11 @@ class MainActivity : AppCompatActivity() {
             controller.playerError == null &&
             controller.playbackState != Player.STATE_ENDED
         ) {
+            // Bluetooth/headset unplug and audio-focus pauses must not be
+            // interpreted as a stalled stream. Reset the watchdog while paused.
+            if (!controller.playWhenReady) {
+                lastProgressAt = System.currentTimeMillis()
+            }
             val position = controller.currentPosition
             if (position > lastPosition + 100) {
                 lastPosition = position
@@ -833,6 +838,7 @@ class MainActivity : AppCompatActivity() {
 
             if (
                 audioFocusLostAt == 0L &&
+                controller.playWhenReady &&
                 System.currentTimeMillis() - lastProgressAt > 15000
             ) {
                 watchdogTriggered = true
