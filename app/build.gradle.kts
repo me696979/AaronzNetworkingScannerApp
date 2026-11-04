@@ -11,7 +11,7 @@ android {
         applicationId = "huntington.localscannerapp"
         minSdk = 26
         targetSdk = 36
-        versionCode = 27
+        versionCode = 1000
         versionName = "2.0.0"
     }
 
