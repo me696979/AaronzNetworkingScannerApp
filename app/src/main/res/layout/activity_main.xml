@@ -54,9 +54,10 @@
             android:background="@drawable/scanner_lcd_frame">
 
             <TextView
+                android:id="@+id/lcdMonitorHeader"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="● LIVE MONITOR  /  ACTIVE TRANSMISSION"
+                android:text="● LIVE MONITOR  /  SCANNING"
                 android:textColor="#6CFF88"
                 android:textStyle="bold"
                 android:textSize="12sp"
