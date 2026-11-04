@@ -146,10 +146,11 @@
         <Button android:id="@+id/feedButton" android:layout_width="match_parent"
             android:layout_height="48dp" android:text="FEED: LOADING…" android:textColor="#D9FFE0"
             android:backgroundTint="#173D20" android:visibility="gone" />
-        <TextView android:layout_width="match_parent" android:layout_height="78dp"
-            android:gravity="center" android:text="● ● ● ● ● ● ● ● ● ● ● ● ● ● ●\n● ● ● ● ● ● ● ● ● ● ● ● ● ● ●\n● ● ● ● ● ● ● ● ● ● ● ● ● ● ●"
-            android:textSize="18sp" android:letterSpacing="0.12" android:textColor="#39543E"
-            android:background="#101713" android:layout_marginTop="10dp"
+        <TextView android:layout_width="match_parent" android:layout_height="118dp"
+            android:gravity="center" android:text="● ● ● ● ● ● ● ● ● ● ● ● ● ● ●\n● ● ● ● ● ● ● ● ● ● ● ● ● ● ●\n● ● ● ● ● ● ● ● ● ● ● ● ● ● ●\n● ● ● ● ● ● ● ● ● ● ● ● ● ● ●"
+            android:textSize="17sp" android:letterSpacing="0.12" android:textColor="#344B39"
+            android:background="@drawable/scanner_speaker" android:layout_marginTop="12dp"
+            android:padding="10dp"
             android:contentDescription="Scanner speaker grille" />
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
             android:text="Scannerz Network  •  Created by AaronzNetworking  •  v2.0.0"
