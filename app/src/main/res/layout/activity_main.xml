@@ -17,30 +17,30 @@
         android:background="@drawable/scanner_shell">
 
         <!-- Physical-scanner-inspired top: antenna, dual knobs and status strip -->
-        <LinearLayout android:layout_width="match_parent" android:layout_height="76dp"
+        <LinearLayout android:layout_width="match_parent" android:layout_height="92dp"
             android:gravity="bottom|center_horizontal" android:orientation="horizontal"
             android:paddingBottom="4dp">
-            <TextView android:layout_width="34dp" android:layout_height="72dp"
-                android:background="#14271B" android:gravity="center"
-                android:text="│" android:textColor="#65FF82" android:textSize="55sp"
+            <TextView android:layout_width="34dp" android:layout_height="88dp"
+                android:background="@drawable/scanner_antenna" android:gravity="center"
+                android:text=" " android:textColor="#65FF82" android:textSize="55sp"
                 android:contentDescription="Decorative scanner antenna" />
             <TextView android:layout_width="0dp" android:layout_weight="1"
                 android:layout_height="match_parent" android:gravity="bottom|center"
                 android:text="SCANNERZ NETWORK\nCreated by AaronzNetworking" android:textStyle="bold"
                 android:textColor="#65FF82" android:textSize="14sp"
                 android:fontFamily="monospace" />
-            <TextView android:layout_width="60dp" android:layout_height="55dp"
+            <TextView android:layout_width="60dp" android:layout_height="60dp"
                 android:layout_marginEnd="8dp" android:gravity="center"
-                android:background="#25382B" android:text="VOL\n◉"
+                android:background="@drawable/scanner_knob" android:text="VOL\n●"
                 android:textColor="#D9FFE0" android:textSize="15sp"
                 android:contentDescription="Volume knob decoration" />
             <TextView android:layout_width="60dp" android:layout_height="55dp"
-                android:gravity="center" android:background="#25382B"
-                android:text="SQL\n◉" android:textColor="#D9FFE0"
+                android:gravity="center" android:background="@drawable/scanner_knob"
+                android:text="SQL\n●" android:textColor="#D9FFE0"
                 android:textSize="15sp" android:contentDescription="Squelch knob decoration" />
         </LinearLayout>
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="● LIVE  •  DIGITAL SCANNER  •  v2.0.0"
+            android:text="SCANNERZ NETWORK   •   DIGITAL RECEIVER   •   v2.0.0"
             android:gravity="center" android:textColor="#65FF82"
             android:textSize="11sp" android:fontFamily="monospace"
             android:padding="9dp" android:background="#102A16" />
