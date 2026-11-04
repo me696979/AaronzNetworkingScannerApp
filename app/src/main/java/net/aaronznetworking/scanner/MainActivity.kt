@@ -987,15 +987,18 @@ class MainActivity : AppCompatActivity() {
         val data = withContext(Dispatchers.IO) { getJson("/api/feeds") } ?: return false
         val arr = data.optJSONArray("feeds") ?: return false
         val previousSlug = selectedFeedSlug
-        feeds.clear()
+        val discoveredFeeds = mutableListOf<FeedOption>()
         for (i in 0 until arr.length()) {
             val item = arr.getJSONObject(i)
             val slug = item.optString("slug").trim()
-            if (slug.isBlank()) continue
+            if (slug.isBlank() || discoveredFeeds.any { it.slug == slug }) continue
             val weather = item.optJSONObject("weather_radio")
-            feeds.add(FeedOption(slug, item.optString("name", slug), item.optString("location", ""), weather?.optString("talkgroup_id")?.takeIf { it.isNotBlank() && it != "null" }))
+            discoveredFeeds.add(FeedOption(slug, item.optString("name", slug), item.optString("location", ""), weather?.optString("talkgroup_id")?.takeIf { it.isNotBlank() && it != "null" }))
         }
-        if (feeds.isEmpty()) return false
+        // Keep the last valid list if the server temporarily returns an empty response.
+        if (discoveredFeeds.isEmpty()) return false
+        feeds.clear()
+        feeds.addAll(discoveredFeeds)
         val saved = prefs.getString("selected_feed_slug", "").orEmpty()
         val selected = feeds.firstOrNull { it.slug == previousSlug }
             ?: feeds.firstOrNull { it.slug == saved }
@@ -1027,9 +1030,21 @@ class MainActivity : AppCompatActivity() {
         val labels = feeds.map { if (it.location.isBlank()) it.name else "${it.name} • ${it.location}" }.toTypedArray()
         val checked = feeds.indexOfFirst { it.slug == selectedFeedSlug }
         AlertDialog.Builder(this).setTitle("Select Scanner Feed").setSingleChoiceItems(labels, checked) { dialog, which ->
-            manualNwsActive = false; preNwsBlockedTalkgroups = null; applySelectedFeed(feeds[which]); talkgroups.clear(); blockedTalkgroups.clear(); loadSavedBlockedTalkgroups()
-            scope.launch { loadTalkgroups(); if (running) restartScannerAtLiveEdge("Feed changed — returning to live calls…") }
+            val chosen = feeds[which]
             dialog.dismiss()
+            if (chosen.slug == selectedFeedSlug) return@setSingleChoiceItems
+            manualNwsActive = false
+            preNwsBlockedTalkgroups = null
+            applySelectedFeed(chosen)
+            talkgroups.clear()
+            blockedTalkgroups.clear()
+            loadSavedBlockedTalkgroups()
+            scope.launch {
+                loadTalkgroups()
+                updateAnnouncements()
+                updateWeather()
+                if (running) restartScannerAtLiveEdge("Feed changed — returning to live calls…")
+            }
         }.setNegativeButton("Cancel", null).show()
     }
 
