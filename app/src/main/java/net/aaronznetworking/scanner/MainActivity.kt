@@ -270,7 +270,7 @@ class MainActivity : AppCompatActivity() {
             scope.launch {
                 if (talkgroups.isEmpty()) {
                     val button = findViewById<Button>(R.id.talkgroupButton)
-                    button.text = "TGIDs\n…"
+                    button.text = "TGIDs"
                     val loaded = loadTalkgroups()
                     if (!loaded) {
                         updateTalkgroupButton()
@@ -1266,7 +1266,8 @@ class MainActivity : AppCompatActivity() {
         val existingIds = talkgroups.map { it.selectionKey }.toSet()
         val blockedExisting = blockedTalkgroups.count { it in existingIds }
         val enabled = (talkgroups.size - blockedExisting).coerceAtLeast(0)
-        button.text = "TGIDs\n$enabled/${talkgroups.size}"
+        button.text = "TGIDs"
+        button.contentDescription = "Choose talkgroups. $enabled of ${talkgroups.size} enabled"
     }
 
     private fun showTalkgroupDialog() {
