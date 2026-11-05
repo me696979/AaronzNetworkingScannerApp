@@ -173,16 +173,29 @@ class MainActivity : AppCompatActivity() {
     private var lastDefaultNetwork: Network? = null
     private var networkRecoveryJob: Job? = null
 
+    private fun scheduleNetworkRecovery(network: Network) {
+        networkRecoveryJob?.cancel()
+        networkRecoveryJob = scope.launch {
+            delay(1200)
+            if (!running || weatherInterrupting) return@launch
+            if (connectivityManager.activeNetwork != network) return@launch
+            val capabilities = connectivityManager.getNetworkCapabilities(network)
+            if (capabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) != true) {
+                networkInterrupted = true
+                return@launch
+            }
+            networkInterrupted = false
+            restartScannerAtLiveEdge("Connection restored — returning to live calls…")
+        }
+    }
+
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onLost(network: Network) {
             runOnUiThread {
                 if (!running) return@runOnUiThread
-                // Losing the old Wi-Fi network after cellular is already default
-                // must not interrupt an otherwise healthy stream.
-                if (connectivityManager.activeNetwork != null) return@runOnUiThread
                 networkInterrupted = true
-                findViewById<TextView>(R.id.status).text =
-                    "Network interrupted — waiting to reconnect…"
+                // The replacement default network may already be connecting.
+                connectivityManager.activeNetwork?.let { scheduleNetworkRecovery(it) }
             }
         }
 
@@ -191,18 +204,22 @@ class MainActivity : AppCompatActivity() {
                 val previous = lastDefaultNetwork
                 lastDefaultNetwork = network
                 if (!running || weatherInterrupting) return@runOnUiThread
-                val shouldRecover = networkInterrupted ||
-                    (previous != null && previous != network)
-                if (!shouldRecover) return@runOnUiThread
-                networkRecoveryJob?.cancel()
-                networkRecoveryJob = scope.launch {
-                    delay(800)
-                    if (!running || weatherInterrupting ||
-                        connectivityManager.activeNetwork != network) return@launch
-                    networkInterrupted = false
-                    restartScannerAtLiveEdge(
-                        "Network changed — returning to live calls…"
-                    )
+                if (networkInterrupted || previous == null || previous != network) {
+                    scheduleNetworkRecovery(network)
+                }
+            }
+        }
+
+        override fun onCapabilitiesChanged(
+            network: Network,
+            capabilities: android.net.NetworkCapabilities
+        ) {
+            if (!capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return
+            runOnUiThread {
+                if (!running || weatherInterrupting) return@runOnUiThread
+                if (networkInterrupted || lastDefaultNetwork != network) {
+                    lastDefaultNetwork = network
+                    scheduleNetworkRecovery(network)
                 }
             }
         }
@@ -235,6 +252,15 @@ class MainActivity : AppCompatActivity() {
                                 !weatherInterrupting
                             ) {
                                 audioFocusLostAt = System.currentTimeMillis()
+                                // Never leave an old paused transmission queued indefinitely
+                                // when a car stereo or Bluetooth device disconnects.
+                                scope.launch {
+                                    delay(2500)
+                                    if (running && !weatherInterrupting && audioFocusLostAt > 0L) {
+                                        audioFocusLostAt = 0L
+                                        restartScannerAtLiveEdge("Audio device changed — waiting for live calls…")
+                                    }
+                                }
                             }
                         }
 
@@ -243,8 +269,13 @@ class MainActivity : AppCompatActivity() {
                                 val interruptedFor = System.currentTimeMillis() - audioFocusLostAt
                                 audioFocusLostAt = 0L
 
-                                // Do not discard the active call when audio focus returns.
-                                // The Media3 player handles pause/resume for transient focus changes.
+                                // Resume at the LIVE edge, not at the position of an old
+                                // recording held while Bluetooth/car audio was disconnected.
+                                if (interruptedFor > 1500) {
+                                    scope.launch {
+                                        restartScannerAtLiveEdge("Audio output restored — returning to live calls…")
+                                    }
+                                }
 
                             }
                         }
@@ -784,6 +815,11 @@ class MainActivity : AppCompatActivity() {
 
             val edgeTime = liveEdgeReceivedAt
             if (edgeTime != null && callReceivedAt != null && !callReceivedAt.isAfter(edgeTime)) {
+                continue
+            }
+            // If a device was offline or audio was paused, skip aged recordings
+            // rather than catching up on stale transmissions.
+            if (callReceivedAt != null && callReceivedAt.isBefore(Instant.now().minusSeconds(45))) {
                 continue
             }
 
