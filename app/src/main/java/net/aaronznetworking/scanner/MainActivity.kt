@@ -621,7 +621,7 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             android.util.Log.w("ScannerzNetwork", "Background monitoring startup failed", e)
         }
-        findViewById<Button>(R.id.startButton).text = "STOP SCANNER"
+        findViewById<Button>(R.id.startButton).text = "STOP"
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
         updateLiveMonitorHeader(false)
