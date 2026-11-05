@@ -3,16 +3,19 @@ package net.aaronznetworking.scanner
 import android.Manifest
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.media.AudioAttributes as PlatformAudioAttributes
 import android.media.MediaPlayer
+import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Bundle
 import android.os.Looper
+import android.os.PowerManager
 import android.speech.tts.TextToSpeech
 import android.view.View
 import android.widget.Button
@@ -27,6 +30,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -75,6 +79,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var controllerFuture: ListenableFuture<MediaController>
 
     private var running = false
+    private var monitorWakeLock: PowerManager.WakeLock? = null
     private var cursor: String? = null
     private var liveEdgeReceivedAt: Instant? = null
     private var scannerJob: Job? = null
@@ -163,22 +168,58 @@ class MainActivity : AppCompatActivity() {
         getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     }
 
+    // The default-network callback can report Wi-Fi/cellular handoffs without an
+    // intervening onLost. Debounce handoffs so rapid changes do not restart twice.
+    private var lastDefaultNetwork: Network? = null
+    private var networkRecoveryJob: Job? = null
+
+    private fun scheduleNetworkRecovery(network: Network) {
+        networkRecoveryJob?.cancel()
+        networkRecoveryJob = scope.launch {
+            delay(1200)
+            if (!running || weatherInterrupting) return@launch
+            if (connectivityManager.activeNetwork != network) return@launch
+            val capabilities = connectivityManager.getNetworkCapabilities(network)
+            if (capabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) != true) {
+                networkInterrupted = true
+                return@launch
+            }
+            networkInterrupted = false
+            restartScannerAtLiveEdge("Connection restored — returning to live calls…")
+        }
+    }
+
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onLost(network: Network) {
-            if (running) {
+            runOnUiThread {
+                if (!running) return@runOnUiThread
                 networkInterrupted = true
-                runOnUiThread {
-                    findViewById<TextView>(R.id.status).text =
-                        "Network interrupted — waiting to reconnect…"
-                }
+                // The replacement default network may already be connecting.
+                connectivityManager.activeNetwork?.let { scheduleNetworkRecovery(it) }
             }
         }
 
         override fun onAvailable(network: Network) {
-            if (running && networkInterrupted && !weatherInterrupting) {
-                networkInterrupted = false
-                scope.launch {
-                    restartScannerAtLiveEdge("Network restored — returning to live calls…")
+            runOnUiThread {
+                val previous = lastDefaultNetwork
+                lastDefaultNetwork = network
+                if (!running || weatherInterrupting) return@runOnUiThread
+                if (networkInterrupted || previous == null || previous != network) {
+                    scheduleNetworkRecovery(network)
+                }
+            }
+        }
+
+        override fun onCapabilitiesChanged(
+            network: Network,
+            capabilities: android.net.NetworkCapabilities
+        ) {
+            if (!capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return
+            runOnUiThread {
+                if (!running || weatherInterrupting) return@runOnUiThread
+                if (networkInterrupted || lastDefaultNetwork != network) {
+                    lastDefaultNetwork = network
+                    scheduleNetworkRecovery(network)
                 }
             }
         }
@@ -211,6 +252,15 @@ class MainActivity : AppCompatActivity() {
                                 !weatherInterrupting
                             ) {
                                 audioFocusLostAt = System.currentTimeMillis()
+                                // Never leave an old paused transmission queued indefinitely
+                                // when a car stereo or Bluetooth device disconnects.
+                                scope.launch {
+                                    delay(2500)
+                                    if (running && !weatherInterrupting && audioFocusLostAt > 0L) {
+                                        audioFocusLostAt = 0L
+                                        restartScannerAtLiveEdge("Audio device changed — waiting for live calls…")
+                                    }
+                                }
                             }
                         }
 
@@ -219,15 +269,14 @@ class MainActivity : AppCompatActivity() {
                                 val interruptedFor = System.currentTimeMillis() - audioFocusLostAt
                                 audioFocusLostAt = 0L
 
-                                // Very short notification tones do not reset the scanner.
-                                // Longer phone/media interruptions return to the live edge.
-                                if (interruptedFor >= 2500) {
+                                // Resume at the LIVE edge, not at the position of an old
+                                // recording held while Bluetooth/car audio was disconnected.
+                                if (interruptedFor > 1500) {
                                     scope.launch {
-                                        restartScannerAtLiveEdge(
-                                            "Audio interruption ended — returning to live calls…"
-                                        )
+                                        restartScannerAtLiveEdge("Audio output restored — returning to live calls…")
                                     }
                                 }
+
                             }
                         }
                     })
@@ -252,7 +301,7 @@ class MainActivity : AppCompatActivity() {
             scope.launch {
                 if (talkgroups.isEmpty()) {
                     val button = findViewById<Button>(R.id.talkgroupButton)
-                    button.text = "LOADING TALKGROUPS…"
+                    button.text = "TGIDs"
                     val loaded = loadTalkgroups()
                     if (!loaded) {
                         updateTalkgroupButton()
@@ -269,6 +318,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.feedButton).setOnClickListener { showFeedDialog() }
+        findViewById<Button>(R.id.feedQuickNav).setOnClickListener { showFeedDialog() }
 
         loadSavedBlockedTalkgroups()
         setupCollapsibleSections()
@@ -278,6 +328,8 @@ class MainActivity : AppCompatActivity() {
         renderRecentCalls()
         renderAnnouncements()
         updateTalkgroupButton()
+        setupScannerDashboard()
+        setupScannerSideControls()
 
         try {
             connectivityManager.registerDefaultNetworkCallback(networkCallback)
@@ -333,48 +385,9 @@ class MainActivity : AppCompatActivity() {
             loadTalkgroups()
         }
 
-        val now = System.currentTimeMillis()
-        val backgroundedFor =
-            if (appBackgroundedAt > 0L) now - appBackgroundedAt else 0L
-
-        /*
-         * Android may suspend the Activity's scanner loop while the app is in
-         * the background. If we return after a meaningful background period,
-         * discard the old cursor and rejoin the server's current live edge.
-         *
-         * IMPORTANT: ordinary radio silence does NOT trigger this. The scanner
-         * can sit idle for hours and still play the very next live call.
-         */
-        if (
-            running &&
-            backgroundedFor >= 15000L &&
-            !weatherInterrupting &&
-            !manualNwsActive
-        ) {
-            appBackgroundedAt = 0L
-            audioFocusLostAt = 0L
-            scope.launch {
-                restartScannerAtLiveEdge(
-                    "App resumed — returning to live calls…"
-                )
-            }
-            return
-        }
-
+        // Rebinding the Activity must never stop a transmission.
+        // Scanner recovery is driven by actual stream/network failures, not screen unlock.
         appBackgroundedAt = 0L
-
-        if (
-            running &&
-            audioFocusLostAt > 0 &&
-            now - audioFocusLostAt >= 2500 &&
-            !weatherInterrupting &&
-            !manualNwsActive
-        ) {
-            audioFocusLostAt = 0L
-            scope.launch {
-                restartScannerAtLiveEdge("Returning to live calls…")
-            }
-        }
     }
 
     override fun onStop() {
@@ -382,6 +395,140 @@ class MainActivity : AppCompatActivity() {
             appBackgroundedAt = System.currentTimeMillis()
         }
         super.onStop()
+    }
+
+    private fun setupScannerSideControls() {
+        val audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        findViewById<Button>(R.id.volumeUpButton).setOnClickListener {
+            audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
+        }
+        findViewById<Button>(R.id.volumeDownButton).setOnClickListener {
+            audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
+        }
+        // SQL is decorative on this streaming receiver: no RF squelch to adjust.
+        findViewById<Button>(R.id.squelchUpButton).setOnClickListener { }
+        findViewById<Button>(R.id.squelchDownButton).setOnClickListener { }
+    }
+
+    // Background call updates must not overwrite the title of an open LCD menu.
+    private fun updateLiveMonitorHeader(active: Boolean) {
+        findViewById<ScannerAudioMeter>(R.id.scannerAudioMeter).setActive(active)
+        if (findViewById<View>(R.id.lcdLiveContent).visibility != View.VISIBLE) return
+        findViewById<TextView>(R.id.lcdMonitorHeader).text =
+            if (manualNwsActive) "● NWS WEATHER RADIO  /  " + (if (active) "RECEIVING" else "MONITORING")
+            else if (active) "● LIVE MONITOR  /  ACTIVE TRANSMISSION"
+            else "● LIVE MONITOR  /  SCANNING"
+    }
+
+    private fun setupScannerDashboard() {
+        // All informational pages use the same physical-scanner LCD, rather than
+        // appearing as independent cards below the scanner controls.
+        val lcd = findViewById<LinearLayout>(R.id.lcdPageContainer)
+        val live = findViewById<View>(R.id.lcdLiveContent)
+        val sections = listOf(
+            R.id.transcriptSection, R.id.announcementSection,
+            R.id.recentCallsSection, R.id.weatherSection, R.id.alertsSection
+        )
+        sections.forEach { sectionId ->
+            val section = findViewById<View>(sectionId)
+            (section.parent as? android.view.ViewGroup)?.removeView(section)
+            lcd.addView(section)
+            section.visibility = View.GONE
+        }
+
+        var settingsPageRef: View? = null
+        val monitorHeader = findViewById<TextView>(R.id.lcdMonitorHeader)
+        val pageTitles = mapOf(
+            R.id.transcriptSection to "TRANSCRIPTS",
+            R.id.announcementSection to "ANNOUNCEMENTS",
+            R.id.recentCallsSection to "RECENT CALLS",
+            R.id.weatherSection to "LOCAL WEATHER",
+            R.id.alertsSection to "WEATHER ALERTS"
+        )
+        fun showLcdPage(sectionId: Int?) {
+            settingsPageRef?.visibility = View.GONE
+            sections.forEach { findViewById<View>(it).visibility = View.GONE }
+            if (sectionId == null) {
+                lcd.visibility = View.GONE
+                live.visibility = View.VISIBLE
+                monitorHeader.text = if (manualNwsActive) "● NWS WEATHER RADIO  /  MONITORING"
+                else if (findViewById<TextView>(R.id.status).text.toString().contains("RECEIVING", ignoreCase = true))
+                    "● LIVE MONITOR  /  ACTIVE TRANSMISSION" else "● LIVE MONITOR  /  SCANNING"
+            } else {
+                live.visibility = View.GONE
+                lcd.visibility = View.VISIBLE
+                findViewById<View>(sectionId).visibility = View.VISIBLE
+                monitorHeader.text = "● SCANNER MENU  /  " + (pageTitles[sectionId] ?: "MENU")
+            }
+        }
+
+        val buttons = listOf(
+            R.id.transcriptsNav to R.id.transcriptSection,
+            R.id.announcementsNav to R.id.announcementSection,
+            R.id.recentCallsNav to R.id.recentCallsSection,
+            R.id.weatherNav to R.id.weatherSection,
+            R.id.alertsNav to R.id.alertsSection
+        )
+        buttons.forEach { (buttonId, sectionId) ->
+            findViewById<Button>(buttonId).setOnClickListener {
+                val opening = findViewById<View>(sectionId).visibility != View.VISIBLE
+                showLcdPage(if (opening) sectionId else null)
+            }
+        }
+        // Settings is an LCD page, not a modal dialog that covers the scanner.
+        val settingsPage = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(12, 12, 12, 12)
+            visibility = View.GONE
+        }
+        fun settingsLabel(message: String) = TextView(this).apply {
+            text = message
+            textSize = 14f
+            setTextColor(android.graphics.Color.rgb(172, 215, 180))
+            setPadding(0, 8, 0, 8)
+        }
+        settingsPage.addView(settingsLabel("SCANNER SETTINGS"))
+        val feedLabel = settingsLabel("")
+        settingsPage.addView(feedLabel)
+        settingsPage.addView(Button(this).apply {
+            text = "Choose scanner feed"
+            setOnClickListener { showFeedDialog() }
+        })
+        settingsPage.addView(settingsLabel("Audio volume is controlled by the VOL buttons on the scanner."))
+        val talkgroupsShortcut = Button(this).apply {
+            text = "Choose talkgroups"
+            setOnClickListener { findViewById<Button>(R.id.talkgroupButton).performClick() }
+        }
+        settingsPage.addView(talkgroupsShortcut)
+        val weatherShortcut = Button(this).apply {
+            text = "Weather preferences"
+            setOnClickListener { showLcdPage(R.id.weatherSection) }
+        }
+        settingsPage.addView(weatherShortcut)
+        val alertsShortcut = Button(this).apply {
+            text = "Weather alerts"
+            setOnClickListener { showLcdPage(R.id.alertsSection) }
+        }
+        settingsPage.addView(alertsShortcut)
+        settingsPage.addView(settingsLabel("Scannerz Network 2.0.0 • Created by AaronzNetworking"))
+        lcd.addView(settingsPage)
+        settingsPageRef = settingsPage
+        findViewById<Button>(R.id.settingsNav).setOnClickListener {
+            val opening = settingsPage.visibility != View.VISIBLE
+            showLcdPage(null)
+            if (opening) {
+                feedLabel.text = "Current feed: " + (feeds.firstOrNull { it.slug == selectedFeedSlug }?.name ?: selectedFeedSlug)
+                live.visibility = View.GONE
+                lcd.visibility = View.VISIBLE
+                settingsPage.visibility = View.VISIBLE
+                monitorHeader.text = "● SCANNER MENU  /  SETTINGS"
+            }
+        }
+        // The existing start button retains its power/start/stop behavior.
+        // A separate SCAN control restores the LCD without stopping audio.
+        findViewById<Button>(R.id.scanDisplayButton).setOnClickListener {
+            showLcdPage(null)
+        }
     }
 
     private fun startLiveEvents() {
@@ -493,9 +640,22 @@ class MainActivity : AppCompatActivity() {
 
     private fun startScanner() {
         running = true
-        findViewById<Button>(R.id.startButton).text = "STOP SCANNER"
+        try {
+            val power = getSystemService(Context.POWER_SERVICE) as PowerManager
+            monitorWakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ScannerzNetwork:LiveMonitor").apply {
+                setReferenceCounted(false)
+                acquire(6 * 60 * 60 * 1000L)
+            }
+            ContextCompat.startForegroundService(this, Intent(this, ScannerPlaybackService::class.java).apply {
+                action = ScannerPlaybackService.ACTION_MONITOR
+            })
+        } catch (e: Exception) {
+            android.util.Log.w("ScannerzNetwork", "Background monitoring startup failed", e)
+        }
+        findViewById<Button>(R.id.startButton).text = "STOP"
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
+        updateLiveMonitorHeader(false)
 
         scope.launch(Dispatchers.IO) {
             sendListenerHeartbeat()
@@ -533,6 +693,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.status).text = message
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
+        updateLiveMonitorHeader(false)
 
         scannerJob = scope.launch {
             scannerLoop(generation)
@@ -587,6 +748,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopScanner() {
         running = false
+        monitorWakeLock?.let { if (it.isHeld) it.release() }
+        monitorWakeLock = null
+        startService(Intent(this, ScannerPlaybackService::class.java).apply {
+            action = ScannerPlaybackService.ACTION_STOP_MONITOR
+        })
         scannerGeneration += 1
         scannerJob?.cancel()
         scannerJob = null
@@ -606,10 +772,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        findViewById<Button>(R.id.startButton).text = "START SCANNER"
+        findViewById<Button>(R.id.startButton).text = "START"
         findViewById<TextView>(R.id.status).text = "Stopped"
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
+        updateLiveMonitorHeader(false)
     }
 
     private suspend fun pollCalls(generation: Long) {
@@ -648,6 +815,11 @@ class MainActivity : AppCompatActivity() {
 
             val edgeTime = liveEdgeReceivedAt
             if (edgeTime != null && callReceivedAt != null && !callReceivedAt.isAfter(edgeTime)) {
+                continue
+            }
+            // If a device was offline or audio was paused, skip aged recordings
+            // rather than catching up on stale transmissions.
+            if (callReceivedAt != null && callReceivedAt.isBefore(Instant.now().minusSeconds(45))) {
                 continue
             }
 
@@ -707,18 +879,33 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Compact one-line app display: TGID + database/SDRTrunk-resolved name only.
-        findViewById<TextView>(R.id.nowPlaying).text = "TGID $tg • $label"
-        findViewById<TextView>(R.id.details).text = ""
-        findViewById<TextView>(R.id.status).text = "Playing"
+        // Display real transmission metadata without changing playback timing.
+        findViewById<TextView>(R.id.nowPlaying).text = label.ifBlank { "TGID $tg" }
+        findViewById<TextView>(R.id.details).text = "ACTIVE CALL  •  TGID $tg"
+        findViewById<TextView>(R.id.status).text = "● RECEIVING TRANSMISSION"
+        updateLiveMonitorHeader(true)
 
-        controller.setMediaItem(MediaItem.fromUri(base + audioUrl))
+        // MediaSession exposes this metadata to Bluetooth displays and the
+        // Android lock-screen media controls while a call is playing.
+        val callTitle = label.ifBlank { "TGID $tg" }
+        val metadata = MediaMetadata.Builder()
+            .setTitle(callTitle)
+            .setArtist("Scannerz Network")
+            .setAlbumTitle("Live scanner • TGID $tg")
+            .build()
+        val mediaItem = MediaItem.Builder()
+            .setUri(base + audioUrl)
+            .setMediaMetadata(metadata)
+            .build()
+        controller.setMediaItem(mediaItem)
         controller.prepare()
         controller.play()
 
         var lastPosition = -1L
         var lastProgressAt = System.currentTimeMillis()
+        var pausedSince = 0L
         var watchdogTriggered = false
+        var pausedTooLong = false
 
         while (
             currentCoroutineContext().isActive &&
@@ -728,6 +915,20 @@ class MainActivity : AppCompatActivity() {
             controller.playerError == null &&
             controller.playbackState != Player.STATE_ENDED
         ) {
+            // Bluetooth/headset unplug and audio-focus pauses must not be
+            // interpreted as a stalled stream. Reset the watchdog while paused.
+            if (!controller.playWhenReady) {
+                lastProgressAt = System.currentTimeMillis()
+                if (pausedSince == 0L) pausedSince = lastProgressAt
+                // Bluetooth disconnects can pause playback with USER_REQUEST,
+                // not AUDIO_FOCUS_LOSS. Never wait forever for that recording.
+                if (lastProgressAt - pausedSince > 2500L) {
+                    pausedTooLong = true
+                    break
+                }
+            } else {
+                pausedSince = 0L
+            }
             val position = controller.currentPosition
             if (position > lastPosition + 100) {
                 lastPosition = position
@@ -736,6 +937,7 @@ class MainActivity : AppCompatActivity() {
 
             if (
                 audioFocusLostAt == 0L &&
+                controller.playWhenReady &&
                 System.currentTimeMillis() - lastProgressAt > 15000
             ) {
                 watchdogTriggered = true
@@ -746,6 +948,14 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (!running || generation != scannerGeneration || weatherInterrupting) return
+
+        if (pausedTooLong) {
+            controller.stop()
+            controller.clearMediaItems()
+            audioFocusLostAt = 0L
+            restartScannerAtLiveEdge("Bluetooth/audio disconnected — returning to live calls…")
+            return
+        }
 
         if (watchdogTriggered) {
             controller.stop()
@@ -767,6 +977,7 @@ class MainActivity : AppCompatActivity() {
         addRecentCall(callId, label, tg)
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
+        updateLiveMonitorHeader(false)
     }
 
     private fun addRecentCall(id: String, label: String, tgid: String) {
@@ -868,7 +1079,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        section.visibility = View.VISIBLE
+        // Announcements are accessible from the dedicated button; never force
+        // the panel open over the scanner display when updates arrive.
         textView.text = activeAnnouncements.joinToString("\n\n") {
             "${it.title}\n${it.message}"
         }
@@ -908,22 +1120,25 @@ class MainActivity : AppCompatActivity() {
         val data = withContext(Dispatchers.IO) { getJson("/api/feeds") } ?: return false
         val arr = data.optJSONArray("feeds") ?: return false
         val previousSlug = selectedFeedSlug
-        feeds.clear()
+        val discoveredFeeds = mutableListOf<FeedOption>()
         for (i in 0 until arr.length()) {
             val item = arr.getJSONObject(i)
             val slug = item.optString("slug").trim()
-            if (slug.isBlank()) continue
+            if (slug.isBlank() || discoveredFeeds.any { it.slug == slug }) continue
             val weather = item.optJSONObject("weather_radio")
-            feeds.add(FeedOption(slug, item.optString("name", slug), item.optString("location", ""), weather?.optString("talkgroup_id")?.takeIf { it.isNotBlank() && it != "null" }))
+            discoveredFeeds.add(FeedOption(slug, item.optString("name", slug), item.optString("location", ""), weather?.optString("talkgroup_id")?.takeIf { it.isNotBlank() && it != "null" }))
         }
-        if (feeds.isEmpty()) return false
+        // Keep the last valid list if the server temporarily returns an empty response.
+        if (discoveredFeeds.isEmpty()) return false
+        feeds.clear()
+        feeds.addAll(discoveredFeeds)
         val saved = prefs.getString("selected_feed_slug", "").orEmpty()
         val selected = feeds.firstOrNull { it.slug == previousSlug }
             ?: feeds.firstOrNull { it.slug == saved }
             ?: feeds.first()
         applySelectedFeed(selected)
-        findViewById<Button>(R.id.feedButton).visibility =
-            if (feeds.size > 1) View.VISIBLE else View.GONE
+        // Keep feed discovery visible even when only the home feed is registered.
+        findViewById<Button>(R.id.feedButton).visibility = View.VISIBLE
         return true
     }
 
@@ -936,13 +1151,39 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showFeedDialog() {
-        if (feeds.size <= 1) return
+        if (feeds.size <= 1) {
+            AlertDialog.Builder(this)
+                .setTitle("Scannerz Network Feeds")
+                .setMessage("Your home scanner feed is currently the only available feed. More feeds will appear here as they are added to Scannerz Network.")
+                .setPositiveButton("Refresh") { _, _ -> scope.launch { loadFeeds() } }
+                .setNegativeButton("Close", null)
+                .show()
+            return
+        }
         val labels = feeds.map { if (it.location.isBlank()) it.name else "${it.name} • ${it.location}" }.toTypedArray()
         val checked = feeds.indexOfFirst { it.slug == selectedFeedSlug }
         AlertDialog.Builder(this).setTitle("Select Scanner Feed").setSingleChoiceItems(labels, checked) { dialog, which ->
-            manualNwsActive = false; preNwsBlockedTalkgroups = null; applySelectedFeed(feeds[which]); talkgroups.clear(); blockedTalkgroups.clear(); loadSavedBlockedTalkgroups()
-            scope.launch { loadTalkgroups(); if (running) restartScannerAtLiveEdge("Feed changed — returning to live calls…") }
+            val chosen = feeds[which]
             dialog.dismiss()
+            if (chosen.slug == selectedFeedSlug) return@setSingleChoiceItems
+            manualNwsActive = false
+            preNwsBlockedTalkgroups = null
+            applySelectedFeed(chosen)
+            talkgroups.clear()
+            blockedTalkgroups.clear()
+            loadSavedBlockedTalkgroups()
+            scope.launch {
+                loadTalkgroups()
+                updateAnnouncements()
+                updateWeather()
+                updateStatsAndAlerts()
+                if (running) restartScannerAtLiveEdge("Feed changed — returning to live calls…")
+            }
+        }.setNeutralButton("Refresh feeds") { _, _ ->
+            scope.launch {
+                loadFeeds()
+                showFeedDialog()
+            }
         }.setNegativeButton("Cancel", null).show()
     }
 
@@ -1073,14 +1314,15 @@ class MainActivity : AppCompatActivity() {
     private fun updateTalkgroupButton() {
         val button = findViewById<Button>(R.id.talkgroupButton)
         if (talkgroups.isEmpty()) {
-            button.text = "CHOOSE TALKGROUPS"
+            button.text = "TGIDs"
             return
         }
 
         val existingIds = talkgroups.map { it.selectionKey }.toSet()
         val blockedExisting = blockedTalkgroups.count { it in existingIds }
         val enabled = (talkgroups.size - blockedExisting).coerceAtLeast(0)
-        button.text = "TALKGROUPS: $enabled/${talkgroups.size} ENABLED"
+        button.text = "TGIDs"
+        button.contentDescription = "Choose talkgroups. $enabled of ${talkgroups.size} enabled"
     }
 
     private fun showTalkgroupDialog() {
@@ -1174,6 +1416,7 @@ class MainActivity : AppCompatActivity() {
             "NWS Weather Radio selected — joining weather audio…"
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
+        updateLiveMonitorHeader(false)
 
         val data = withContext(Dispatchers.IO) {
             getJson(
@@ -1247,6 +1490,11 @@ class MainActivity : AppCompatActivity() {
         alertsEnabled.isChecked = prefs.getBoolean("weather_alerts_enabled", false)
         soundEnabled.isChecked = prefs.getBoolean("weather_alert_sound_enabled", false)
         speechEnabled.isChecked = prefs.getBoolean("weather_alert_speech_enabled", false)
+
+        findViewById<Button>(R.id.wxQuickButton).setOnClickListener {
+            nwsButton.performClick()
+            findViewById<Button>(R.id.scanDisplayButton).performClick()
+        }
 
         nwsButton.setOnClickListener {
             val nwsId = weatherRadioTalkgroup?.trim()?.toIntOrNull()
@@ -1331,6 +1579,11 @@ class MainActivity : AppCompatActivity() {
         }
         button.isEnabled = manualNwsActive || available
         button.alpha = if (button.isEnabled) 1.0f else 0.42f
+        findViewById<Button>(R.id.wxQuickButton).apply {
+            text = if (manualNwsActive) "WX - RETURN TO SCAN" else "WX - NOAA RADIO"
+            isEnabled = button.isEnabled
+            alpha = button.alpha
+        }
     }
 
     private fun exitManualNwsMode() {
@@ -1791,6 +2044,9 @@ class MainActivity : AppCompatActivity() {
             val collapsed = content.visibility != View.GONE
             prefs.edit().putBoolean(key, collapsed).apply()
             applyState(collapsed)
+            // Closing an LCD information panel returns to the live scanner display.
+            // Do not stop or restart audio playback.
+            if (collapsed) findViewById<Button>(R.id.scanDisplayButton).performClick()
         }
     }
 
@@ -1814,6 +2070,8 @@ class MainActivity : AppCompatActivity() {
 
                 findViewById<TextView>(R.id.listeners).text =
                     "Listeners: ${stats.optInt("listeners")}     Peak: ${stats.optInt("peak")}\n$breakdown"
+                findViewById<TextView>(R.id.lcdListenerStats).text =
+                    "Listeners: ${stats.optInt("listeners")}   Scanners: $scanners   Peak: ${stats.optInt("peak")}"
             }
 
             val arr = alertsJson?.optJSONArray("alerts")
@@ -1874,6 +2132,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        monitorWakeLock?.let { if (it.isHeld) it.release() }
+        monitorWakeLock = null
         running = false
         scannerGeneration += 1
         scannerJob?.cancel()
