@@ -378,6 +378,7 @@ class MainActivity : AppCompatActivity() {
 
     // Background call updates must not overwrite the title of an open LCD menu.
     private fun updateLiveMonitorHeader(active: Boolean) {
+        findViewById<ScannerAudioMeter>(R.id.scannerAudioMeter).setActive(active)
         if (findViewById<View>(R.id.lcdLiveContent).visibility != View.VISIBLE) return
         findViewById<TextView>(R.id.lcdMonitorHeader).text =
             if (active) "● LIVE MONITOR  /  ACTIVE TRANSMISSION"
