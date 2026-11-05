@@ -3,6 +3,7 @@ package net.aaronznetworking.scanner
 import android.Manifest
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
@@ -14,6 +15,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Bundle
 import android.os.Looper
+import android.os.PowerManager
 import android.speech.tts.TextToSpeech
 import android.view.View
 import android.widget.Button
@@ -77,6 +79,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var controllerFuture: ListenableFuture<MediaController>
 
     private var running = false
+    private var monitorWakeLock: PowerManager.WakeLock? = null
     private var cursor: String? = null
     private var liveEdgeReceivedAt: Instant? = null
     private var scannerJob: Job? = null
@@ -606,6 +609,18 @@ class MainActivity : AppCompatActivity() {
 
     private fun startScanner() {
         running = true
+        try {
+            val power = getSystemService(Context.POWER_SERVICE) as PowerManager
+            monitorWakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ScannerzNetwork:LiveMonitor").apply {
+                setReferenceCounted(false)
+                acquire(6 * 60 * 60 * 1000L)
+            }
+            ContextCompat.startForegroundService(this, Intent(this, ScannerPlaybackService::class.java).apply {
+                action = ScannerPlaybackService.ACTION_MONITOR
+            })
+        } catch (e: Exception) {
+            android.util.Log.w("ScannerzNetwork", "Background monitoring startup failed", e)
+        }
         findViewById<Button>(R.id.startButton).text = "STOP SCANNER"
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
@@ -702,6 +717,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopScanner() {
         running = false
+        monitorWakeLock?.let { if (it.isHeld) it.release() }
+        monitorWakeLock = null
+        startService(Intent(this, ScannerPlaybackService::class.java).apply {
+            action = ScannerPlaybackService.ACTION_STOP_MONITOR
+        })
         scannerGeneration += 1
         scannerJob?.cancel()
         scannerJob = null
@@ -2056,6 +2076,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        monitorWakeLock?.let { if (it.isHeld) it.release() }
+        monitorWakeLock = null
         running = false
         scannerGeneration += 1
         scannerJob?.cancel()
