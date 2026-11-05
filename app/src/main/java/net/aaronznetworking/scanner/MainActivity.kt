@@ -1956,6 +1956,9 @@ class MainActivity : AppCompatActivity() {
             val collapsed = content.visibility != View.GONE
             prefs.edit().putBoolean(key, collapsed).apply()
             applyState(collapsed)
+            // Closing an LCD information panel returns to the live scanner display.
+            // Do not stop or restart audio playback.
+            if (collapsed) findViewById<Button>(R.id.scanDisplayButton).performClick()
         }
     }
 
