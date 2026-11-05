@@ -1259,14 +1259,14 @@ class MainActivity : AppCompatActivity() {
     private fun updateTalkgroupButton() {
         val button = findViewById<Button>(R.id.talkgroupButton)
         if (talkgroups.isEmpty()) {
-            button.text = "CHOOSE TALKGROUPS"
+            button.text = "TGIDs"
             return
         }
 
         val existingIds = talkgroups.map { it.selectionKey }.toSet()
         val blockedExisting = blockedTalkgroups.count { it in existingIds }
         val enabled = (talkgroups.size - blockedExisting).coerceAtLeast(0)
-        button.text = "TALKGROUPS: $enabled/${talkgroups.size} ENABLED"
+        button.text = "TGIDs\n$enabled/${talkgroups.size}"
     }
 
     private fun showTalkgroupDialog() {
