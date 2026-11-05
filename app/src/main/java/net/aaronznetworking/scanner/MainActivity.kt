@@ -381,7 +381,8 @@ class MainActivity : AppCompatActivity() {
         findViewById<ScannerAudioMeter>(R.id.scannerAudioMeter).setActive(active)
         if (findViewById<View>(R.id.lcdLiveContent).visibility != View.VISIBLE) return
         findViewById<TextView>(R.id.lcdMonitorHeader).text =
-            if (active) "● LIVE MONITOR  /  ACTIVE TRANSMISSION"
+            if (manualNwsActive) "● NWS WEATHER RADIO  /  " + (if (active) "RECEIVING" else "MONITORING")
+            else if (active) "● LIVE MONITOR  /  ACTIVE TRANSMISSION"
             else "● LIVE MONITOR  /  SCANNING"
     }
 
@@ -416,7 +417,8 @@ class MainActivity : AppCompatActivity() {
             if (sectionId == null) {
                 lcd.visibility = View.GONE
                 live.visibility = View.VISIBLE
-                monitorHeader.text = if (findViewById<TextView>(R.id.status).text.toString().contains("RECEIVING", ignoreCase = true))
+                monitorHeader.text = if (manualNwsActive) "● NWS WEATHER RADIO  /  MONITORING"
+                else if (findViewById<TextView>(R.id.status).text.toString().contains("RECEIVING", ignoreCase = true))
                     "● LIVE MONITOR  /  ACTIVE TRANSMISSION" else "● LIVE MONITOR  /  SCANNING"
             } else {
                 live.visibility = View.GONE
@@ -1413,6 +1415,11 @@ class MainActivity : AppCompatActivity() {
         soundEnabled.isChecked = prefs.getBoolean("weather_alert_sound_enabled", false)
         speechEnabled.isChecked = prefs.getBoolean("weather_alert_speech_enabled", false)
 
+        findViewById<Button>(R.id.wxQuickButton).setOnClickListener {
+            nwsButton.performClick()
+            findViewById<Button>(R.id.scanDisplayButton).performClick()
+        }
+
         nwsButton.setOnClickListener {
             val nwsId = weatherRadioTalkgroup?.trim()?.toIntOrNull()
             if (manualNwsActive) {
@@ -1496,6 +1503,11 @@ class MainActivity : AppCompatActivity() {
         }
         button.isEnabled = manualNwsActive || available
         button.alpha = if (button.isEnabled) 1.0f else 0.42f
+        findViewById<Button>(R.id.wxQuickButton).apply {
+            text = if (manualNwsActive) "WX - RETURN TO SCAN" else "WX - NOAA RADIO"
+            isEnabled = button.isEnabled
+            alpha = button.alpha
+        }
     }
 
     private fun exitManualNwsMode() {
