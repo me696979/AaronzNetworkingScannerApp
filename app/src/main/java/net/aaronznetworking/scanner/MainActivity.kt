@@ -903,7 +903,9 @@ class MainActivity : AppCompatActivity() {
 
         var lastPosition = -1L
         var lastProgressAt = System.currentTimeMillis()
+        var pausedSince = 0L
         var watchdogTriggered = false
+        var pausedTooLong = false
 
         while (
             currentCoroutineContext().isActive &&
@@ -917,6 +919,15 @@ class MainActivity : AppCompatActivity() {
             // interpreted as a stalled stream. Reset the watchdog while paused.
             if (!controller.playWhenReady) {
                 lastProgressAt = System.currentTimeMillis()
+                if (pausedSince == 0L) pausedSince = lastProgressAt
+                // Bluetooth disconnects can pause playback with USER_REQUEST,
+                // not AUDIO_FOCUS_LOSS. Never wait forever for that recording.
+                if (lastProgressAt - pausedSince > 2500L) {
+                    pausedTooLong = true
+                    break
+                }
+            } else {
+                pausedSince = 0L
             }
             val position = controller.currentPosition
             if (position > lastPosition + 100) {
@@ -937,6 +948,14 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (!running || generation != scannerGeneration || weatherInterrupting) return
+
+        if (pausedTooLong) {
+            controller.stop()
+            controller.clearMediaItems()
+            audioFocusLostAt = 0L
+            restartScannerAtLiveEdge("Bluetooth/audio disconnected — returning to live calls…")
+            return
+        }
 
         if (watchdogTriggered) {
             controller.stop()
