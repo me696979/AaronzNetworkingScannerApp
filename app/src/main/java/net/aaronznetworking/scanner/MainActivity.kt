@@ -270,7 +270,7 @@ class MainActivity : AppCompatActivity() {
             scope.launch {
                 if (talkgroups.isEmpty()) {
                     val button = findViewById<Button>(R.id.talkgroupButton)
-                    button.text = "LOADING TALKGROUPS…"
+                    button.text = "TGIDs\n…"
                     val loaded = loadTalkgroups()
                     if (!loaded) {
                         updateTalkgroupButton()
