@@ -772,7 +772,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        findViewById<Button>(R.id.startButton).text = "START SCANNER"
+        findViewById<Button>(R.id.startButton).text = "START"
         findViewById<TextView>(R.id.status).text = "Stopped"
         findViewById<TextView>(R.id.nowPlaying).text = "Scanning…"
         findViewById<TextView>(R.id.details).text = ""
