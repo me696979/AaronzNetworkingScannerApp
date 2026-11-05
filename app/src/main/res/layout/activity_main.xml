@@ -146,6 +146,7 @@
         <Button android:id="@+id/feedButton" android:layout_width="match_parent"
             android:layout_height="48dp" android:text="FEED: LOADING…" android:textColor="#D9FFE0"
             android:backgroundTint="#173D20" android:visibility="gone" />
+        <Button android:id="@+id/wxQuickButton" android:layout_width="match_parent" android:layout_height="48dp" android:text="WX - NOAA RADIO" android:textColor="#65FF82" android:backgroundTint="#17391E" />
         <!-- Audio activity meter sits directly above the speaker grille. -->
         <net.aaronznetworking.scanner.ScannerAudioMeter
             android:id="@+id/scannerAudioMeter"
